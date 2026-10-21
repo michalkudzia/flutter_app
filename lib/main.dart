@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:web/web.dart' as web;
 import 'game_core.dart';
 
 void main() {
   // Konfiguracja tokena Mapbox przed uruchomieniem aplikacji
-  MapboxOptions.setAccessToken("TWÓJ_MAPBOX_ACCESS_TOKEN");
+  MapboxOptions.setAccessToken("pk.eyJ1IjoiYWRhbWRyIiwiYSI6ImNtdXZtdnZkajA3ZGEyd3F4emRnMTRrMzEifQ.bQGEH4h2WO2v3QCup-i60Q");
   runApp(const TopoGameApp());
 }
 
@@ -31,6 +34,15 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   final TopoGuessGame game = TopoGuessGame();
   MapboxMap? mapboxMap;
+
+  // Funkcja pomocnicza do zamykania aplikacji / karty
+  void _closeApp() {
+    if (kIsWeb) {
+      web.window.close();
+    } else {
+      SystemNavigator.pop();
+    }
+  }
 
   void _onMapCreated(MapboxMap map) {
     mapboxMap = map;
@@ -61,6 +73,14 @@ class _GameScreenState extends State<GameScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Gra Topograficzna | Punkty: ${state['score']}'),
+        actions: [
+          // Przycisk zamknięcia w prawym rogu paska
+          IconButton(
+            icon: const Icon(Icons.exit_to_app),
+            onPressed: _closeApp,
+            tooltip: 'Koniec gry',
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -95,8 +115,26 @@ class _GameScreenState extends State<GameScreen> {
                     child: ListView.builder(
                       itemCount: log.length,
                       itemBuilder: (context, index) {
-                        return Text('- ${log[log.length - 1 - index]}', style: const TextStyle(fontSize: 13));
+                        // Poprawiona składnia wyświetlania logów od najnowszego
+                        return Text(
+                          '- ${log[log.length - 1 - index]}',
+                          style: const TextStyle(fontSize: 13),
+                        );
                       },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Przycisk kończący na dole panelu
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _closeApp,
+                      icon: const Icon(Icons.close),
+                      label: const Text('Zakończ i zamknij'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                      ),
                     ),
                   ),
                 ],
