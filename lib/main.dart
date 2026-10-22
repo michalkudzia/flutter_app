@@ -32,8 +32,37 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
-  final TopoGuessGame game = TopoGuessGame();
+  TopoGuessGame game = TopoGuessGame();
   MapboxMap? mapboxMap;
+
+  void _showGameOverDialog(int finalScore) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Koniec gry'),
+            content: Text('Gratulacje! Twój ostateczny wynik to: $finalScore punktów.'),
+            actions: [
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop(); // Zamknij okno dialogowe
+                  setState(() {
+                    game = TopoGuessGame(); // Reset stanu gry
+                  });
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Zagraj ponownie'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
 
   // Funkcja pomocnicza do zamykania aplikacji / karty
   void _closeApp() {
@@ -57,10 +86,8 @@ class _GameScreenState extends State<GameScreen> {
   void _makeGuess(double lat, double lon) {
     setState(() {
       final result = game.submitGuess(lat, lon);
-      if (result['game_over']) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cel odnaleziony! Wynik końcowy: ${game.score}')),
-        );
+      if (result['game_over'] == true) {
+        _showGameOverDialog(game.score);
       }
     });
   }
@@ -128,11 +155,11 @@ class _GameScreenState extends State<GameScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _closeApp,
-                      icon: const Icon(Icons.close),
-                      label: const Text('Zakończ i zamknij'),
+                      onPressed: () => _showGameOverDialog(game.score),
+                      icon: const Icon(Icons.flag),
+                      label: const Text('Podsumuj grę'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
+                        backgroundColor: Colors.orangeAccent,
                         foregroundColor: Colors.white,
                       ),
                     ),
