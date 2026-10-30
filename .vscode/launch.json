@@ -2,9 +2,66 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Flutter",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "Flutter (profile)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "Flutter Web (Chrome)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "chrome"
+            ]
+        },
+        {
+            "name": "Flutter Web (Chrome - Profile)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "args": [
+                "-d",
+                "chrome"
+            ]
+        },
+        {
+            "name": "Flutter Web (Chrome - Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "args": [
+                "-d",
+                "chrome"
+            ]
+        },
+        {
             "name": "Flutter Web (Edge)",
             "request": "launch",
             "type": "dart",
+            "program": "lib/main.dart",
+            "args": [
+                "-d",
+                "edge"
+            ]
+        },
+        {
+            "name": "Flutter Web (Edge - Profile)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
             "args": [
                 "-d",
                 "edge"

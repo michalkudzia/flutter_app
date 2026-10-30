@@ -1,25 +1,40 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/widgets.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
-import 'package:web/web.dart' as web;
-import 'game_core.dart';
 
 void main() {
-  // Konfiguracja tokena Mapbox przed uruchomieniem aplikacji
-  MapboxOptions.setAccessToken("pk.eyJ1IjoiYWRhbWRyIiwiYSI6ImNtdXZtdnZkajA3ZGEyd3F4emRnMTRrMzEifQ.bQGEH4h2WO2v3QCup-i60Q");
-  runApp(const TopoGameApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  debugPrint('[APP] main() rozpoczęte');
+  
+  MapboxOptions.setAccessToken(
+    const String.fromEnvironment('ACCESS_TOKEN', defaultValue: 'pk.eyJ1IjoiYWRhbWRyIiwiYSI6ImNtdXZtdnZkajA3ZGEyd3F4emRnMTRrMzEifQ.bQGEH4h2WO2v3QCup-i60Q'),
+  );
+
+  runApp(const MyApp());
 }
 
-class TopoGameApp extends StatelessWidget {
-  const TopoGameApp({super.key});
+class MapScreen extends StatelessWidget {
+  const MapScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return const MapWidget();
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    debugPrint('[UI] MyApp.build() wywołane');
     return MaterialApp(
-      title: 'Topograficzna Gra Mapbox',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      title: 'Warszawa da się lubić',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
       home: const GameScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -32,139 +47,103 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
-  TopoGuessGame game = TopoGuessGame();
-  MapboxMap? mapboxMap;
+  MapboxMap? _mapboxMap;
+  Offset? _pinScreenPosition;
+  late final Widget _cachedMapWidget;
+  int _clickCount = 0;
 
-  void _showGameOverDialog(int finalScore) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('Koniec gry'),
-            content: Text('Gratulacje! Twój ostateczny wynik to: $finalScore punktów.'),
-            actions: [
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop(); // Zamknij okno dialogowe
-                  setState(() {
-                    game = TopoGuessGame(); // Reset stanu gry
-                  });
-                },
-                icon: const Icon(Icons.refresh),
-                label: const Text('Zagraj ponownie'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ],
-          );
-        },
-      );
-    }
-
-  // Funkcja pomocnicza do zamykania aplikacji / karty
-  void _closeApp() {
-    if (kIsWeb) {
-      web.window.close();
-    } else {
-      SystemNavigator.pop();
-    }
-  }
-
-  void _onMapCreated(MapboxMap map) {
-    mapboxMap = map;
-    map.setCamera(
-      CameraOptions(
-        center: Point(coordinates: Position(21.0122, 52.2297)),
-        zoom: 13.0,
-      ),
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('[STATE] GameScreen.initState() - tworzenie zcacheowanego MapWidget');
+    _cachedMapWidget = MapWidget(
+      onMapCreated: _onMapCreated,
     );
   }
 
-  void _makeGuess(double lat, double lon) {
-    setState(() {
-      final result = game.submitGuess(lat, lon);
-      if (result['game_over'] == true) {
-        _showGameOverDialog(game.score);
-      }
-    });
+  void _onMapCreated(MapboxMap controller) async {
+    debugPrint('[MAPBOX] _onMapCreated() wywołane przez kontroler');
+    _mapboxMap = controller;
+
+    try {
+      await _mapboxMap!.setCamera(
+        CameraOptions(
+          center: Point(coordinates: Position(21.0122, 52.2297)),
+          zoom: 11.0,
+        ),
+      );
+      debugPrint('[MAPBOX] Kamera początkowa ustawiona pomyślnie');
+    } catch (e) {
+      debugPrint('[MAPBOX ERROR] Błąd ustawiania kamery: $e');
+    }
+
+    try {
+      _mapboxMap!.addInteraction(
+        TapInteraction.onMap((context) {
+          _clickCount++;
+          debugPrint('[INTERACTION] Kliknięcie #$_clickCount | Ekran: ${context.touchPosition} | Geo: ${context.point.coordinates}');
+          
+          final double lng = context.point.coordinates.lng.toDouble();
+          final double lat = context.point.coordinates.lat.toDouble();
+          
+          final double x = context.touchPosition.x;
+          final double y = context.touchPosition.y;
+
+          setState(() {
+            _pinScreenPosition = Offset(x, y);
+          });
+          debugPrint('[UI] setState wykonane, nowa pozycja szpilki: $_pinScreenPosition');
+
+          _makeGuess(lat, lng);
+        }),
+      );
+      debugPrint('[MAPBOX] TapInteraction zarejestrowana pomyślnie');
+    } catch (e) {
+      debugPrint('[MAPBOX ERROR] Błąd rejestracji interakcji: $e');
+    }
+  }
+
+  void _makeGuess(double lat, double lng) {
+    debugPrint('[GAME] _makeGuess przetworzone dla współrzędnych: lat=$lat, lng=$lng');
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = game.getState();
-    final log = state['log'] as List<String>;
-
+    debugPrint('[UI] GameScreen.build() wywołane (stan szpilki: $_pinScreenPosition)');
     return Scaffold(
       appBar: AppBar(
-        title: Text('Gra Topograficzna | Punkty: ${state['score']}'),
-        actions: [
-          // Przycisk zamknięcia w prawym rogu paska
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: _closeApp,
-            tooltip: 'Koniec gry',
-          ),
-        ],
+        title: const Text('Warszawa da się lubić'),
       ),
       body: Column(
         children: [
-          // Widget mapy Mapbox zajmujący górną część ekranu
           Expanded(
-            flex: 2,
-            child: MapWidget(
-              key: const ValueKey("mapWidget"),
-              onMapCreated: _onMapCreated,
-            ),
-          ),
-          // Panel dolny ze statystykami i sterowaniem
-          Expanded(
-            flex: 1,
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Szukany obiekt: ${state['target_name']}',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: () => _makeGuess(52.2297, 21.0122),
-                    child: const Text('Sprawdź strzał w centrum (PKiN)'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Dziennik rozgrywki:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: log.length,
-                      itemBuilder: (context, index) {
-                        // Poprawiona składnia wyświetlania logów od najnowszego
-                        return Text(
-                          '- ${log[log.length - 1 - index]}',
-                          style: const TextStyle(fontSize: 13),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // Przycisk kończący na dole panelu
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _showGameOverDialog(game.score),
-                      icon: const Icon(Icons.flag),
-                      label: const Text('Podsumuj grę'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orangeAccent,
-                        foregroundColor: Colors.white,
+            flex: 3,
+            child: Stack(
+              children: [
+                _cachedMapWidget,
+                if (_pinScreenPosition != null)
+                  Positioned(
+                    left: _pinScreenPosition!.dx - 20,
+                    top: _pinScreenPosition!.dy - 40,
+                    child: const IgnorePointer(
+                      child: Icon(
+                        Icons.location_pin,
+                        size: 40,
+                        color: Colors.red,
                       ),
                     ),
                   ),
-                ],
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Container(
+              padding: const EdgeInsets.all(16.0),
+              alignment: Alignment.center,
+              child: const Text(
+                'Kliknij na mapie, aby wskazać szukane miejsce w Warszawie.',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
               ),
             ),
           ),
