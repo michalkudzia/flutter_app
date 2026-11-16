@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -7,6 +8,34 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+
+double calculateStraightLineDistanceKm(Point target, Point clickedPoint) {
+  const earthRadiusKm = 6371.0088;
+  final targetLatitude = target.coordinates.lat * math.pi / 180;
+  final clickedLatitude = clickedPoint.coordinates.lat * math.pi / 180;
+  final latitudeDelta = clickedLatitude - targetLatitude;
+  final longitudeDelta = (clickedPoint.coordinates.lng - target.coordinates.lng) * math.pi / 180;
+
+  final haversine =
+      math.pow(math.sin(latitudeDelta / 2), 2) +
+      math.cos(targetLatitude) * math.cos(clickedLatitude) * math.pow(math.sin(longitudeDelta / 2), 2);
+  final normalizedHaversine = haversine.clamp(0.0, 1.0);
+
+  return 2 * earthRadiusKm * math.asin(math.sqrt(normalizedHaversine));
+}
+
+void showStraightLineDistanceSnackbar({
+  required BuildContext context,
+  required Point target,
+  required Point clickedPoint,
+}) {
+  final distanceKm = calculateStraightLineDistanceKm(target, clickedPoint);
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(content: Text('Odległość w linii prostej: ${distanceKm.toStringAsFixed(2)} km')),
+    );
+}
 
 class _LoadedMapConfig {
   const _LoadedMapConfig({required this.token, required this.cityViewports});
@@ -124,14 +153,31 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
+class _LondonPlace {
+  const _LondonPlace({required this.name, required this.point});
+
+  final String name;
+  final Point point;
+}
+
 class _MapScreenState extends State<MapScreen> {
   static const _londonPlacesSourceId = 'london-places-source';
   static const _londonPlacesLayerId = 'london-places-layer';
+  static const _categoryDataKeys = {
+    'beginner': 'poczatkujacy',
+    'advanced': 'zaawansowany',
+    'expert': 'ekspert',
+  };
 
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointAnnotationManager;
+  PointAnnotationManager? _placeAnnotationManager;
+  Map<String, List<_LondonPlace>>? _placesByCategory;
+  final math.Random _random = math.Random();
   Uint8List? _markerImage;
   String _selectedCity = 'Londyn';
+  String _selectedCategory = 'beginner';
+  _LondonPlace? _targetPlace;
 
   Future<void> _selectCity(String city) async {
     final viewport = widget.cityViewports[city];
@@ -155,6 +201,9 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
     _pointAnnotationManager = await mapboxMap.annotations.createPointAnnotationManager();
+    if (!kIsWeb) {
+      _placeAnnotationManager = await mapboxMap.annotations.createPointAnnotationManager();
+    }
 
     debugPrint('PointAnnotationManager created: $_pointAnnotationManager');
 
@@ -184,15 +233,69 @@ class _MapScreenState extends State<MapScreen> {
       StyleImage.bytes(markerImage),
     );
 
-    final places = await _loadLondonPlaces();
+    _placesByCategory = await _loadLondonPlaces();
+    _chooseRandomTarget(_selectedCategory);
+    await _renderSelectedPlaces();
+  }
+
+  Future<void> _selectCategory(String category) async {
+    if (!_categoryDataKeys.containsKey(category)) {
+      throw StateError('Nieznana kategoria miejsc "$category".');
+    }
+
+    final places = _placesByCategory?[_categoryDataKeys[category]!];
+    if (places != null && places.isEmpty) {
+      throw StateError('Kategoria "$category" nie zawiera miejsc do odgadnięcia.');
+    }
+
+    setState(() {
+      _selectedCategory = category;
+      _targetPlace = places == null ? null : places[_random.nextInt(places.length)];
+    });
+
+    await _renderSelectedPlaces();
+  }
+
+  void _chooseRandomTarget(String category) {
+    final dataKey = _categoryDataKeys[category];
+    if (dataKey == null) {
+      throw StateError('Nieznana kategoria miejsc "$category".');
+    }
+
+    final places = _placesByCategory?[dataKey];
+    if (places == null || places.isEmpty) {
+      throw StateError('Brak miejsc do odgadnięcia dla kategorii "$category".');
+    }
+
+    setState(() {
+      _targetPlace = places[_random.nextInt(places.length)];
+    });
+  }
+
+  Future<void> _renderSelectedPlaces() async {
+    final mapboxMap = _mapboxMap;
+    final placesByCategory = _placesByCategory;
+    if (mapboxMap == null || placesByCategory == null) return;
+
+    final markerImage = _markerImage;
+    if (markerImage == null) {
+      throw StateError('Obraz markera nie został jeszcze utworzony.');
+    }
+
+    final dataKey = _categoryDataKeys[_selectedCategory]!;
+    final places = placesByCategory[dataKey];
+    if (places == null) {
+      throw StateError('Plik london.json nie zawiera kategorii "$dataKey".');
+    }
+
     if (kIsWeb) {
       final geoJson = jsonEncode({
         'type': 'FeatureCollection',
         'features': places
             .map(
-              (point) => {
+              (place) => {
                 'type': 'Feature',
-                'geometry': point.toJson(),
+                'geometry': place.point.toJson(),
                 'properties': <String, dynamic>{},
               },
             )
@@ -221,17 +324,18 @@ class _MapScreenState extends State<MapScreen> {
         );
       }
     } else {
-      final annotationManager = _pointAnnotationManager;
+      final annotationManager = _placeAnnotationManager;
       if (annotationManager == null) {
-        throw StateError('PointAnnotationManager nie został zainicjalizowany.');
+        throw StateError('Menedżer markerów miejsc nie został zainicjalizowany.');
       }
 
+      await annotationManager.deleteAll();
       await annotationManager.setIconAllowOverlap(true);
       await annotationManager.createMulti(
         places
             .map(
-              (point) => PointAnnotationOptions(
-                geometry: point,
+              (place) => PointAnnotationOptions(
+                geometry: place.point,
                 image: markerImage,
                 iconAnchor: IconAnchor.BOTTOM,
                 iconSize: 0.7,
@@ -242,7 +346,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Future<List<Point>> _loadLondonPlaces() async {
+  Future<Map<String, List<_LondonPlace>>> _loadLondonPlaces() async {
     final decoded = jsonDecode(await rootBundle.loadString('assets/london.json'));
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('Plik london.json musi zawierać obiekt JSON.');
@@ -253,34 +357,40 @@ class _MapScreenState extends State<MapScreen> {
       throw const FormatException('Plik london.json nie zawiera kategorii miejsc.');
     }
 
-    final points = <Point>[];
+    final placesByCategory = <String, List<_LondonPlace>>{};
     for (final entry in categories.entries) {
       final places = entry.value;
       if (places is! List) {
         throw FormatException('Kategoria "${entry.key}" musi być listą miejsc.');
       }
 
+      final categoryPlaces = <_LondonPlace>[];
       for (var index = 0; index < places.length; index++) {
         final place = places[index];
         if (place is! Map<String, dynamic>) {
           throw FormatException('Miejsce $index w kategorii "${entry.key}" jest nieprawidłowe.');
         }
 
+        final name = place['name'];
         final latitude = place['lat'];
         final longitude = place['lng'];
-        if (latitude is! num || longitude is! num) {
-          throw FormatException('Miejsce $index w kategorii "${entry.key}" nie ma poprawnych współrzędnych.');
+        if (name is! String || latitude is! num || longitude is! num) {
+          throw FormatException('Miejsce $index w kategorii "${entry.key}" ma nieprawidłową nazwę lub współrzędne.');
         }
 
-        points.add(
-          Point(
-            coordinates: Position(longitude.toDouble(), latitude.toDouble()),
+        categoryPlaces.add(
+          _LondonPlace(
+            name: name,
+            point: Point(
+              coordinates: Position(longitude.toDouble(), latitude.toDouble()),
+            ),
           ),
         );
       }
+      placesByCategory[entry.key] = categoryPlaces;
     }
 
-    return points;
+    return placesByCategory;
   }
 
   // Adds a marker at a tapped location.
@@ -290,6 +400,15 @@ class _MapScreenState extends State<MapScreen> {
     debugPrint('Adding marker at position: $point');
 
     if (annotationManager == null || markerImage == null) return;
+
+    final targetPlace = _targetPlace;
+    if (targetPlace != null) {
+      showStraightLineDistanceSnackbar(
+        context: context,
+        target: targetPlace.point,
+        clickedPoint: point,
+      );
+    }
 
     // Check for Web platform if needed to branch logic
     if (kIsWeb) {
@@ -356,35 +475,84 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('MapInsider')),
-      body: Column(
-        children: [
-          SizedBox(
-            height: 64,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              scrollDirection: Axis.horizontal,
-              itemCount: widget.cityViewports.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final city = widget.cityViewports.keys.elementAt(index);
-                return ChoiceChip(
-                  label: Text(city),
-                  selected: _selectedCity == city,
-                  onSelected: (selected) async {
-                    if (selected) await _selectCity(city);
-                  },
-                );
-              },
-            ),
-          ),
-          Expanded(
-            child: MapWidget(
-              viewport: widget.cityViewports['Londyn']!,
-              onMapCreated: _onMapCreated,
-              onStyleLoadedListener: _onStyleLoaded,
-            ),
-          ),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final sidebarWidth = constraints.maxWidth < 600 ? 160.0 : 240.0;
+          return Row(
+            children: [
+              SizedBox(
+                width: sidebarWidth,
+                child: Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Category', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        DropdownButton<String>(
+                          value: _selectedCategory,
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem(value: 'beginner', child: Text('beginner')),
+                            DropdownMenuItem(value: 'advanced', child: Text('advanced')),
+                            DropdownMenuItem(value: 'expert', child: Text('expert')),
+                          ],
+                          onChanged: (category) async {
+                            if (category != null) await _selectCategory(category);
+                          },
+                        ),
+                        const SizedBox(height: 24),
+                        Text('Place to guess', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(_targetPlace?.name ?? 'Loading place...'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 64,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.cityViewports.length,
+                        separatorBuilder: (context, index) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) {
+                          final city = widget.cityViewports.keys.elementAt(index);
+                          return ChoiceChip(
+                            label: Text(city),
+                            selected: _selectedCity == city,
+                            onSelected: (selected) async {
+                              if (selected) await _selectCity(city);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: MapWidget(
+                        viewport: widget.cityViewports['Londyn']!,
+                        onMapCreated: _onMapCreated,
+                        onStyleLoadedListener: _onStyleLoaded,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
