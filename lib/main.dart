@@ -80,6 +80,9 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
+  static const _londonPlacesSourceId = 'london-places-source';
+  static const _londonPlacesLayerId = 'london-places-layer';
+
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointAnnotationManager;
   Uint8List? _markerImage;
@@ -131,9 +134,107 @@ class _MapScreenState extends State<MapScreen> {
       1.0,
       StyleImage.bytes(markerImage),
     );
+
+    final places = await _loadLondonPlaces();
+    if (kIsWeb) {
+      final geoJson = jsonEncode({
+        'type': 'FeatureCollection',
+        'features': places
+            .map(
+              (point) => {
+                'type': 'Feature',
+                'geometry': point.toJson(),
+                'properties': <String, dynamic>{},
+              },
+            )
+            .toList(),
+      });
+
+      final existingSource = await mapboxMap.getSource(_londonPlacesSourceId);
+      if (existingSource is GeoJsonSource) {
+        await existingSource.updateGeoJSON(geoJson);
+      } else if (existingSource == null) {
+        await mapboxMap.addSource(
+          GeoJsonSource(id: _londonPlacesSourceId, data: geoJson),
+        );
+      } else {
+        throw StateError('Źródło $_londonPlacesSourceId nie jest źródłem GeoJSON.');
+      }
+
+      if (!await mapboxMap.styleLayerExists(_londonPlacesLayerId)) {
+        await mapboxMap.addLayer(
+          SymbolLayer(
+            id: _londonPlacesLayerId,
+            sourceId: _londonPlacesSourceId,
+            iconImage: 'custom-icon-id',
+            iconAllowOverlap: true,
+          ),
+        );
+      }
+    } else {
+      final annotationManager = _pointAnnotationManager;
+      if (annotationManager == null) {
+        throw StateError('PointAnnotationManager nie został zainicjalizowany.');
+      }
+
+      await annotationManager.setIconAllowOverlap(true);
+      await annotationManager.createMulti(
+        places
+            .map(
+              (point) => PointAnnotationOptions(
+                geometry: point,
+                image: markerImage,
+                iconAnchor: IconAnchor.BOTTOM,
+                iconSize: 0.7,
+              ),
+            )
+            .toList(),
+      );
+    }
   }
 
-  // Instead of using PointAnnotationManager, add a layer directly
+  Future<List<Point>> _loadLondonPlaces() async {
+    final decoded = jsonDecode(await rootBundle.loadString('assets/london.json'));
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Plik london.json musi zawierać obiekt JSON.');
+    }
+
+    final categories = decoded['categories'];
+    if (categories is! Map<String, dynamic>) {
+      throw const FormatException('Plik london.json nie zawiera kategorii miejsc.');
+    }
+
+    final points = <Point>[];
+    for (final entry in categories.entries) {
+      final places = entry.value;
+      if (places is! List) {
+        throw FormatException('Kategoria "${entry.key}" musi być listą miejsc.');
+      }
+
+      for (var index = 0; index < places.length; index++) {
+        final place = places[index];
+        if (place is! Map<String, dynamic>) {
+          throw FormatException('Miejsce $index w kategorii "${entry.key}" jest nieprawidłowe.');
+        }
+
+        final latitude = place['lat'];
+        final longitude = place['lng'];
+        if (latitude is! num || longitude is! num) {
+          throw FormatException('Miejsce $index w kategorii "${entry.key}" nie ma poprawnych współrzędnych.');
+        }
+
+        points.add(
+          Point(
+            coordinates: Position(longitude.toDouble(), latitude.toDouble()),
+          ),
+        );
+      }
+    }
+
+    return points;
+  }
+
+  // Adds a marker at a tapped location.
   Future<void> _addMarker(MapboxMap mapboxMap, Point point) async {
     final annotationManager = _pointAnnotationManager;
     final markerImage = _markerImage;
@@ -162,7 +263,6 @@ class _MapScreenState extends State<MapScreen> {
         );
         await mapboxMap.addLayer(SymbolLayer(id: sourceId, sourceId: sourceId, iconImage: "custom-icon-id"));
       }
-
     } else {
       // Mobile might still work with PointAnnotationManager
       await annotationManager.create(
