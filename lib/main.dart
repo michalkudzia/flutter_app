@@ -160,7 +160,7 @@ class _MapScreenState extends State<MapScreen> {
         await mapboxMap.addSource(
           GeoJsonSource(id: sourceId, data: geoJson),
         );
-        await mapboxMap.addLayer(SymbolLayer(id: sourceId, sourceId: "marker-source", iconImage: "custom-icon-id"));
+        await mapboxMap.addLayer(SymbolLayer(id: sourceId, sourceId: sourceId, iconImage: "custom-icon-id"));
       }
 
     } else {
