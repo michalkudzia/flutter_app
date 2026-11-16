@@ -133,27 +133,6 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  /*
-  // Instead of using PointAnnotationManager, add a layer directly
-  Future<void> _addMarker(MapboxMap mapboxMap, Point point) async {
-    import 'package:flutter/foundation.dart';
-    // Check for Web platform if needed to branch logic
-    if (kIsWeb) {
-      // Add a GeoJSON source and a Symbol Layer using mapboxMap.style
-      await mapboxMap.style.addSource(GeoJsonSource(id: "marker-source", data: point.toJson()));
-      await mapboxMap.style.addLayer(SymbolLayer(
-        id: "marker-layer",
-        sourceId: "marker-source",
-        iconImage: "custom-icon-id", // Ensure this image is loaded in the style
-      ));
-    } else {
-      // Mobile might still work with PointAnnotationManager
-      final manager = await mapboxMap.annotations.createPointAnnotationManager();
-      manager.create(PointAnnotationOptions(geometry: point));
-    }
-  }
-  */
-
   // Instead of using PointAnnotationManager, add a layer directly
   Future<void> _addMarker(MapboxMap mapboxMap, Point point) async {
     final annotationManager = _pointAnnotationManager;
