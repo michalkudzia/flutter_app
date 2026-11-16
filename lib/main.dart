@@ -8,45 +8,88 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
-final Map<String, CameraViewportState> cityViewports = {
-  'Warszawa': CameraViewportState(
-    center: Point(coordinates: Position(21.0122, 52.2297)),
-    zoom: 10,
-    bearing: 0,
-    pitch: 0,
-  ),
-  'Paryż': CameraViewportState(center: Point(coordinates: Position(2.3522, 48.8566)), zoom: 10, bearing: 0, pitch: 0),
-  'Londyn': CameraViewportState(center: Point(coordinates: Position(-0.1276, 51.5072)), zoom: 10, bearing: 0, pitch: 0),
-  'Chicago': CameraViewportState(
-    center: Point(coordinates: Position(-87.6298, 41.8781)),
-    zoom: 10,
-    bearing: 0,
-    pitch: 0,
-  ),
-  'Bombaj': CameraViewportState(center: Point(coordinates: Position(72.8777, 19.0760)), zoom: 10, bearing: 0, pitch: 0),
-  'Tokio': CameraViewportState(center: Point(coordinates: Position(139.6917, 35.6895)), zoom: 10, bearing: 0, pitch: 0),
-  'Meksyk': CameraViewportState(
-    center: Point(coordinates: Position(-99.1332, 19.4326)),
-    zoom: 10,
-    bearing: 0,
-    pitch: 0,
-  ),
-};
+class _LoadedMapConfig {
+  const _LoadedMapConfig({required this.token, required this.cityViewports});
+
+  final String token;
+  final Map<String, CameraViewportState> cityViewports;
+}
+
+Map<String, CameraViewportState> _decodeCityViewports(String json) {
+  final decoded = jsonDecode(json);
+  if (decoded is! Map<String, dynamic>) {
+    throw const FormatException('Plik cityviewports.json musi zawierać obiekt JSON.');
+  }
+
+  final viewports = <String, CameraViewportState>{};
+  for (final entry in decoded.entries) {
+    final cityConfig = entry.value;
+    if (cityConfig is! Map<String, dynamic>) {
+      throw FormatException('Konfiguracja miasta "${entry.key}" musi być obiektem JSON.');
+    }
+
+    final center = cityConfig['center'];
+    final zoom = cityConfig['zoom'];
+    final bearing = cityConfig['bearing'];
+    final pitch = cityConfig['pitch'];
+    if (center is! Map<String, dynamic> ||
+        center['lng'] is! num ||
+        center['lat'] is! num ||
+        zoom is! num ||
+        bearing is! num ||
+        pitch is! num) {
+      throw FormatException('Konfiguracja miasta "${entry.key}" zawiera nieprawidłowe wartości.');
+    }
+
+    viewports[entry.key] = CameraViewportState(
+      center: Point(
+        coordinates: Position(
+          (center['lng'] as num).toDouble(),
+          (center['lat'] as num).toDouble(),
+        ),
+      ),
+      zoom: zoom.toDouble(),
+      bearing: bearing.toDouble(),
+      pitch: pitch.toDouble(),
+    );
+  }
+
+  if (!viewports.containsKey('Londyn')) {
+    throw const FormatException('Plik cityviewports.json musi zawierać konfigurację miasta Londyn.');
+  }
+
+  return viewports;
+}
 
 class MapConfigLoader extends StatelessWidget {
   const MapConfigLoader({super.key});
 
-  // Metoda zwracająca Future z naszym tokenem
-  Future<String> _loadMapboxToken() async {
-    final String jsonString = await rootBundle.loadString('assets/config.json');
-    final Map<String, dynamic> config = jsonDecode(jsonString);
-    return config['mapbox_access_token'] ?? '';
+  Future<_LoadedMapConfig> _loadMapConfig() async {
+    final files = await Future.wait([
+      rootBundle.loadString('assets/config.json'),
+      rootBundle.loadString('assets/cityviewports.json'),
+    ]);
+
+    final decodedConfig = jsonDecode(files[0]);
+    if (decodedConfig is! Map<String, dynamic>) {
+      throw const FormatException('Plik config.json musi zawierać obiekt JSON.');
+    }
+
+    final token = decodedConfig['mapbox_access_token'] ?? '';
+    if (token is! String) {
+      throw const FormatException('Token Mapbox w config.json musi być tekstem.');
+    }
+
+    return _LoadedMapConfig(
+      token: token,
+      cityViewports: _decodeCityViewports(files[1]),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String>(
-      future: _loadMapboxToken(), // 1. Przekazujemy operację asynchroniczną
+    return FutureBuilder<_LoadedMapConfig>(
+      future: _loadMapConfig(),
       builder: (context, snapshot) {
         // 2. Stan: Dane się jeszcze ładują (Spinner)
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -59,13 +102,13 @@ class MapConfigLoader extends StatelessWidget {
         }
 
         // 4. Stan: Sukces – dane zostały pobrane
-        final token = snapshot.data;
-        if (token == null || token.isEmpty) {
+        final config = snapshot.data;
+        if (config == null || config.token.isEmpty) {
           return const Scaffold(body: Center(child: Text('Brak tokenu Mapbox w pliku konfiguracyjnym.')));
         }
 
         // 5. Zwracamy właściwy widok aplikacji, przekazując gotowy token
-        return const MapScreen();
+        return MapScreen(cityViewports: config.cityViewports);
       },
     );
   }
@@ -73,7 +116,9 @@ class MapConfigLoader extends StatelessWidget {
 
 // Przykładowy docelowy widok mapy
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({required this.cityViewports, super.key});
+
+  final Map<String, CameraViewportState> cityViewports;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -89,6 +134,11 @@ class _MapScreenState extends State<MapScreen> {
   String _selectedCity = 'Londyn';
 
   Future<void> _selectCity(String city) async {
+    final viewport = widget.cityViewports[city];
+    if (viewport == null) {
+      throw StateError('Brak konfiguracji viewportu dla miasta "$city".');
+    }
+
     setState(() {
       _selectedCity = city;
     });
@@ -96,7 +146,6 @@ class _MapScreenState extends State<MapScreen> {
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
 
-    final viewport = cityViewports[city]!;
     await mapboxMap.flyTo(
       CameraOptions(center: viewport.center, zoom: viewport.zoom, bearing: viewport.bearing, pitch: viewport.pitch),
       MapAnimationOptions(duration: 1000),
@@ -314,10 +363,10 @@ class _MapScreenState extends State<MapScreen> {
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               scrollDirection: Axis.horizontal,
-              itemCount: cityViewports.length,
+              itemCount: widget.cityViewports.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
-                final city = cityViewports.keys.elementAt(index);
+                final city = widget.cityViewports.keys.elementAt(index);
                 return ChoiceChip(
                   label: Text(city),
                   selected: _selectedCity == city,
@@ -330,7 +379,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
           Expanded(
             child: MapWidget(
-              viewport: cityViewports['Londyn']!,
+              viewport: widget.cityViewports['Londyn']!,
               onMapCreated: _onMapCreated,
               onStyleLoadedListener: _onStyleLoaded,
             ),
