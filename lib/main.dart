@@ -153,16 +153,25 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _LondonPlace {
-  const _LondonPlace({required this.name, required this.point});
+class _Place {
+  const _Place({required this.name, required this.point});
 
   final String name;
   final Point point;
 }
 
 class _MapScreenState extends State<MapScreen> {
-  static const _londonPlacesSourceId = 'london-places-source';
-  static const _londonPlacesLayerId = 'london-places-layer';
+  static const _placesSourceId = 'city-places-source';
+  static const _placesLayerId = 'city-places-layer';
+  static const _cityDataFiles = {
+    'Warszawa': 'warszawa.json',
+    'Paryż': 'paris.json',
+    'Londyn': 'london.json',
+    'Chicago': 'chicago.json',
+    'Bombaj': 'mumbai.json',
+    'Tokio': 'tokio.json',
+    'Meksyk': 'mexico.json',
+  };
   static const _categoryDataKeys = {
     'beginner': 'poczatkujacy',
     'advanced': 'zaawansowany',
@@ -172,12 +181,14 @@ class _MapScreenState extends State<MapScreen> {
   MapboxMap? _mapboxMap;
   PointAnnotationManager? _pointAnnotationManager;
   PointAnnotationManager? _placeAnnotationManager;
-  Map<String, List<_LondonPlace>>? _placesByCategory;
+  Map<String, List<_Place>>? _placesByCategory;
+  bool _isStyleLoaded = false;
   final math.Random _random = math.Random();
   Uint8List? _markerImage;
   String _selectedCity = 'Londyn';
   String _selectedCategory = 'beginner';
-  _LondonPlace? _targetPlace;
+  _Place? _targetPlace;
+  int _citySelectionVersion = 0;
 
   Future<void> _selectCity(String city) async {
     final viewport = widget.cityViewports[city];
@@ -185,13 +196,26 @@ class _MapScreenState extends State<MapScreen> {
       throw StateError('Brak konfiguracji viewportu dla miasta "$city".');
     }
 
+    final requestVersion = ++_citySelectionVersion;
+    final placesByCategory = await _loadCityPlaces(city);
+    if (!mounted || requestVersion != _citySelectionVersion) return;
+    final places = placesByCategory[_categoryDataKeys[_selectedCategory]!];
+    if (places == null || places.isEmpty) {
+      throw StateError('Brak miejsc do odgadnięcia dla kategorii "$_selectedCategory" w mieście "$city".');
+    }
+
     setState(() {
       _selectedCity = city;
+      _placesByCategory = placesByCategory;
+      _targetPlace = places[_random.nextInt(places.length)];
     });
 
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
 
+    if (_isStyleLoaded) {
+      await _renderSelectedPlaces();
+    }
     await mapboxMap.flyTo(
       CameraOptions(center: viewport.center, zoom: viewport.zoom, bearing: viewport.bearing, pitch: viewport.pitch),
       MapAnimationOptions(duration: 1000),
@@ -223,6 +247,7 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _onStyleLoaded(StyleLoadedEventData _) async {
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
+    _isStyleLoaded = false;
 
     final markerImage = _markerImage ?? await _createMarkerImage();
     _markerImage = markerImage;
@@ -233,7 +258,12 @@ class _MapScreenState extends State<MapScreen> {
       StyleImage.bytes(markerImage),
     );
 
-    _placesByCategory = await _loadLondonPlaces();
+    _isStyleLoaded = true;
+    final requestVersion = ++_citySelectionVersion;
+    final city = _selectedCity;
+    final placesByCategory = await _loadCityPlaces(city);
+    if (!mounted || requestVersion != _citySelectionVersion) return;
+    _placesByCategory = placesByCategory;
     _chooseRandomTarget(_selectedCategory);
     await _renderSelectedPlaces();
   }
@@ -285,7 +315,7 @@ class _MapScreenState extends State<MapScreen> {
     final dataKey = _categoryDataKeys[_selectedCategory]!;
     final places = placesByCategory[dataKey];
     if (places == null) {
-      throw StateError('Plik london.json nie zawiera kategorii "$dataKey".');
+      throw StateError('Plik dla miasta "$_selectedCity" nie zawiera kategorii "$dataKey".');
     }
 
     if (kIsWeb) {
@@ -302,22 +332,22 @@ class _MapScreenState extends State<MapScreen> {
             .toList(),
       });
 
-      final existingSource = await mapboxMap.getSource(_londonPlacesSourceId);
+      final existingSource = await mapboxMap.getSource(_placesSourceId);
       if (existingSource is GeoJsonSource) {
         await existingSource.updateGeoJSON(geoJson);
       } else if (existingSource == null) {
         await mapboxMap.addSource(
-          GeoJsonSource(id: _londonPlacesSourceId, data: geoJson),
+          GeoJsonSource(id: _placesSourceId, data: geoJson),
         );
       } else {
-        throw StateError('Źródło $_londonPlacesSourceId nie jest źródłem GeoJSON.');
+        throw StateError('Źródło $_placesSourceId nie jest źródłem GeoJSON.');
       }
 
-      if (!await mapboxMap.styleLayerExists(_londonPlacesLayerId)) {
+      if (!await mapboxMap.styleLayerExists(_placesLayerId)) {
         await mapboxMap.addLayer(
           SymbolLayer(
-            id: _londonPlacesLayerId,
-            sourceId: _londonPlacesSourceId,
+            id: _placesLayerId,
+            sourceId: _placesSourceId,
             iconImage: 'custom-icon-id',
             iconAllowOverlap: true,
           ),
@@ -346,25 +376,30 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Future<Map<String, List<_LondonPlace>>> _loadLondonPlaces() async {
-    final decoded = jsonDecode(await rootBundle.loadString('assets/london.json'));
+  Future<Map<String, List<_Place>>> _loadCityPlaces(String city) async {
+    final dataFile = _cityDataFiles[city];
+    if (dataFile == null) {
+      throw StateError('Brak zestawu miejsc dla miasta "$city".');
+    }
+
+    final decoded = jsonDecode(await rootBundle.loadString('assets/$dataFile'));
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('Plik london.json musi zawierać obiekt JSON.');
+      throw FormatException('Plik $dataFile musi zawierać obiekt JSON.');
     }
 
     final categories = decoded['categories'];
     if (categories is! Map<String, dynamic>) {
-      throw const FormatException('Plik london.json nie zawiera kategorii miejsc.');
+      throw FormatException('Plik $dataFile nie zawiera kategorii miejsc.');
     }
 
-    final placesByCategory = <String, List<_LondonPlace>>{};
+    final placesByCategory = <String, List<_Place>>{};
     for (final entry in categories.entries) {
       final places = entry.value;
       if (places is! List) {
         throw FormatException('Kategoria "${entry.key}" musi być listą miejsc.');
       }
 
-      final categoryPlaces = <_LondonPlace>[];
+      final categoryPlaces = <_Place>[];
       for (var index = 0; index < places.length; index++) {
         final place = places[index];
         if (place is! Map<String, dynamic>) {
@@ -379,7 +414,7 @@ class _MapScreenState extends State<MapScreen> {
         }
 
         categoryPlaces.add(
-          _LondonPlace(
+          _Place(
             name: name,
             point: Point(
               coordinates: Position(longitude.toDouble(), latitude.toDouble()),
