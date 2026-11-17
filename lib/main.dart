@@ -163,6 +163,8 @@ class _Place {
 class _MapScreenState extends State<MapScreen> {
   static const _placesSourceId = 'city-places-source';
   static const _placesLayerId = 'city-places-layer';
+  static const _guessLineSourceId = 'guess-line-source';
+  static const _guessLineLayerId = 'guess-line-layer';
   static const _cityDataFiles = {
     'Warszawa': 'warszawa.json',
     'Paryż': 'paris.json',
@@ -188,6 +190,7 @@ class _MapScreenState extends State<MapScreen> {
   String _selectedCity = 'Londyn';
   String _selectedCategory = 'beginner';
   _Place? _targetPlace;
+  Point? _lastClickedPoint;
   int _citySelectionVersion = 0;
 
   Future<void> _selectCity(String city) async {
@@ -209,6 +212,7 @@ class _MapScreenState extends State<MapScreen> {
       _placesByCategory = placesByCategory;
       _targetPlace = places[_random.nextInt(places.length)];
     });
+    await _clearGuessLine();
 
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
@@ -257,6 +261,7 @@ class _MapScreenState extends State<MapScreen> {
       1.0,
       StyleImage.bytes(markerImage),
     );
+    await _ensureGuessLineLayer(mapboxMap);
 
     _isStyleLoaded = true;
     final requestVersion = ++_citySelectionVersion;
@@ -283,6 +288,7 @@ class _MapScreenState extends State<MapScreen> {
       _targetPlace = places == null ? null : places[_random.nextInt(places.length)];
     });
 
+    await _clearGuessLine();
     await _renderSelectedPlaces();
   }
 
@@ -299,7 +305,73 @@ class _MapScreenState extends State<MapScreen> {
 
     setState(() {
       _targetPlace = places[_random.nextInt(places.length)];
+      _lastClickedPoint = null;
     });
+  }
+
+  Future<void> _ensureGuessLineLayer(MapboxMap mapboxMap) async {
+    final existingSource = await mapboxMap.getSource(_guessLineSourceId);
+    if (existingSource == null) {
+      await mapboxMap.addSource(
+        GeoJsonSource(
+          id: _guessLineSourceId,
+          data: jsonEncode({'type': 'FeatureCollection', 'features': []}),
+          dynamicData: true,
+        ),
+      );
+    } else if (existingSource is! GeoJsonSource) {
+      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
+    }
+
+    if (!await mapboxMap.styleLayerExists(_guessLineLayerId)) {
+      await mapboxMap.addLayer(
+        LineLayer(
+          id: _guessLineLayerId,
+          sourceId: _guessLineSourceId,
+          lineCap: LineCap.ROUND,
+          lineColor: Colors.blue.toARGB32(),
+          lineJoin: LineJoin.ROUND,
+          lineWidth: 4,
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearGuessLine() async {
+    _lastClickedPoint = null;
+    if (!_isStyleLoaded) return;
+    await _updateGuessLine();
+  }
+
+  Future<void> _updateGuessLine() async {
+    final mapboxMap = _mapboxMap;
+    final clickedPoint = _lastClickedPoint;
+    final targetPlace = _targetPlace;
+    if (mapboxMap == null || !_isStyleLoaded) return;
+
+    final source = await mapboxMap.getSource(_guessLineSourceId);
+    if (source is! GeoJsonSource) {
+      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
+    }
+
+    final features = clickedPoint == null || targetPlace == null
+        ? <Map<String, dynamic>>[]
+        : [
+            {
+              'type': 'Feature',
+              'geometry': {
+                'type': 'LineString',
+                'coordinates': [
+                  [clickedPoint.coordinates.lng, clickedPoint.coordinates.lat],
+                  [targetPlace.point.coordinates.lng, targetPlace.point.coordinates.lat],
+                ],
+              },
+              'properties': <String, dynamic>{},
+            },
+          ];
+    await source.updateGeoJSON(
+      jsonEncode({'type': 'FeatureCollection', 'features': features}),
+    );
   }
 
   Future<void> _renderSelectedPlaces() async {
@@ -444,6 +516,7 @@ class _MapScreenState extends State<MapScreen> {
         clickedPoint: point,
       );
     }
+    _lastClickedPoint = point;
 
     // Check for Web platform if needed to branch logic
     if (kIsWeb) {
@@ -472,6 +545,8 @@ class _MapScreenState extends State<MapScreen> {
         PointAnnotationOptions(geometry: point, image: markerImage, iconAnchor: IconAnchor.BOTTOM, iconSize: 0.7),
       );
     }
+
+    await _updateGuessLine();
   }
 
   Future<Uint8List> _createMarkerImage() async {
