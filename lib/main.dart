@@ -167,6 +167,7 @@ class _MapScreenState extends State<MapScreen> {
   static const _placesLayerId = 'city-places-layer';
   static const _guessLineSourceId = 'guess-line-source';
   static const _guessLineLayerId = 'guess-line-layer';
+  static const _guessLinePointsLayerId = 'guess-line-points-layer';
   static const _cityDataFiles = {
     'Warszawa': 'warszawa.json',
     'Paryż': 'paris.json',
@@ -337,6 +338,9 @@ class _MapScreenState extends State<MapScreen> {
     if (await mapboxMap.styleLayerExists(_guessLineLayerId)) {
       await mapboxMap.removeStyleLayer(_guessLineLayerId);
     }
+    if (await mapboxMap.styleLayerExists(_guessLinePointsLayerId)) {
+      await mapboxMap.removeStyleLayer(_guessLinePointsLayerId);
+    }
     await mapboxMap.addLayer(
       LineLayer(
         id: _guessLineLayerId,
@@ -346,6 +350,25 @@ class _MapScreenState extends State<MapScreen> {
         lineColor: const Color(0xFF0066CC).toARGB32(),
         lineJoin: LineJoin.ROUND,
         lineWidth: 4,
+      ),
+    );
+    await mapboxMap.addLayer(
+      CircleLayer(
+        id: _guessLinePointsLayerId,
+        sourceId: _guessLineSourceId,
+        slot: 'top',
+        circleRadius: 9,
+        circleColorExpression: const [
+          'match',
+          ['get', 'label'],
+          'A',
+          '#2a9d8f',
+          'B',
+          '#e76f51',
+          '#000000',
+        ],
+        circleStrokeColor: Colors.white.toARGB32(),
+        circleStrokeWidth: 2,
       ),
     );
 
@@ -368,6 +391,16 @@ class _MapScreenState extends State<MapScreen> {
               ],
             },
             'properties': <String, dynamic>{},
+          },
+          {
+            'type': 'Feature',
+            'geometry': pointA.toJson(),
+            'properties': {'label': 'A'},
+          },
+          {
+            'type': 'Feature',
+            'geometry': pointB.toJson(),
+            'properties': {'label': 'B'},
           },
         ],
       }),
