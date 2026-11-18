@@ -315,12 +315,15 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _ensureGuessLineLayer(MapboxMap mapboxMap) async {
     final cameraState = await mapboxMap.getCameraState();
     final center = cameraState.center.coordinates;
+
+    /*
     final pointA = Point(
       coordinates: Position(center.lng - 0.5, center.lat - 0.5),
     );
     final pointB = Point(
       coordinates: Position(center.lng + 0.5, center.lat + 0.5),
     );
+    */
 
     final existingSource = await mapboxMap.getSource(_guessLineSourceId);
     if (existingSource == null) {
@@ -374,6 +377,7 @@ class _MapScreenState extends State<MapScreen> {
       throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
     }
 
+    /*
     await source.updateGeoJSON(
       jsonEncode({
         'type': 'FeatureCollection',
@@ -402,6 +406,7 @@ class _MapScreenState extends State<MapScreen> {
         ],
       }),
     );
+    */
     developer.log(
       'Guess line layer $_guessLineLayerId initialized with sample data.',
       name: 'guess-line',
@@ -409,6 +414,7 @@ class _MapScreenState extends State<MapScreen> {
       stackTrace: StackTrace.current,
     );
 
+    /*
     final fittedCamera = await mapboxMap.cameraForCoordinatesPadding(
       [pointA, pointB],
       CameraOptions(
@@ -422,6 +428,7 @@ class _MapScreenState extends State<MapScreen> {
       null,
     );
     await mapboxMap.setCamera(fittedCamera);
+    */
   }
 
   Future<void> _clearGuessLine() async {
