@@ -328,7 +328,6 @@ class _MapScreenState extends State<MapScreen> {
         GeoJsonSource(
           id: _guessLineSourceId,
           data: jsonEncode({'type': 'FeatureCollection', 'features': []}),
-          dynamicData: true,
         ),
       );
     } else if (existingSource is! GeoJsonSource) {
@@ -345,7 +344,6 @@ class _MapScreenState extends State<MapScreen> {
       LineLayer(
         id: _guessLineLayerId,
         sourceId: _guessLineSourceId,
-        slot: 'top',
         lineCap: LineCap.ROUND,
         lineColor: const Color(0xFF0066CC).toARGB32(),
         lineJoin: LineJoin.ROUND,
@@ -356,7 +354,6 @@ class _MapScreenState extends State<MapScreen> {
       CircleLayer(
         id: _guessLinePointsLayerId,
         sourceId: _guessLineSourceId,
-        slot: 'top',
         circleRadius: 9,
         circleColorExpression: const [
           'match',

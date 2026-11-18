@@ -34,9 +34,6 @@
             "type": "dart",
             "program": "lib/main.dart",
             "deviceId": "chrome",
-            "toolArgs": [
-                "--web-browser-flag=--auto-open-devtools-for-tabs"
-            ],
             "console": "terminal"
         },
         {
@@ -49,7 +46,7 @@
             "toolArgs": [
                 "--web-browser-flag=--auto-open-devtools-for-tabs"
             ],
-            "console": "terminal"
+            "console": "debugConsole"
         },
         {
             "name": "Flutter Web (Chrome - Debug)",
@@ -61,7 +58,7 @@
             "toolArgs": [
                 "--web-browser-flag=--auto-open-devtools-for-tabs"
             ],
-            "console": "terminal"
+            "console": "debugConsole"
         },
         {
             "name": "Flutter Web (Edge)",
