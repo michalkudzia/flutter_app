@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:logging/logging.dart' show Level;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -310,6 +312,15 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _ensureGuessLineLayer(MapboxMap mapboxMap) async {
+    final cameraState = await mapboxMap.getCameraState();
+    final center = cameraState.center.coordinates;
+    final pointA = Point(
+      coordinates: Position(center.lng - 0.5, center.lat - 0.5),
+    );
+    final pointB = Point(
+      coordinates: Position(center.lng + 0.5, center.lat + 0.5),
+    );
+
     final existingSource = await mapboxMap.getSource(_guessLineSourceId);
     if (existingSource == null) {
       await mapboxMap.addSource(
@@ -323,18 +334,64 @@ class _MapScreenState extends State<MapScreen> {
       throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
     }
 
-    if (!await mapboxMap.styleLayerExists(_guessLineLayerId)) {
-      await mapboxMap.addLayer(
-        LineLayer(
-          id: _guessLineLayerId,
-          sourceId: _guessLineSourceId,
-          lineCap: LineCap.ROUND,
-          lineColor: Colors.blue.toARGB32(),
-          lineJoin: LineJoin.ROUND,
-          lineWidth: 4,
-        ),
-      );
+    if (await mapboxMap.styleLayerExists(_guessLineLayerId)) {
+      await mapboxMap.removeStyleLayer(_guessLineLayerId);
     }
+    await mapboxMap.addLayer(
+      LineLayer(
+        id: _guessLineLayerId,
+        sourceId: _guessLineSourceId,
+        slot: 'top',
+        lineCap: LineCap.ROUND,
+        lineColor: const Color(0xFF0066CC).toARGB32(),
+        lineJoin: LineJoin.ROUND,
+        lineWidth: 4,
+      ),
+    );
+
+    final source = await mapboxMap.getSource(_guessLineSourceId);
+    if (source is! GeoJsonSource) {
+      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
+    }
+
+    await source.updateGeoJSON(
+      jsonEncode({
+        'type': 'FeatureCollection',
+        'features': [
+          {
+            'type': 'Feature',
+            'geometry': {
+              'type': 'LineString',
+              'coordinates': [
+                [pointA.coordinates.lng, pointA.coordinates.lat],
+                [pointB.coordinates.lng, pointB.coordinates.lat],
+              ],
+            },
+            'properties': <String, dynamic>{},
+          },
+        ],
+      }),
+    );
+    developer.log(
+      'Guess line layer $_guessLineLayerId initialized with sample data.',
+      name: 'guess-line',
+      level: Level.INFO.value,
+      stackTrace: StackTrace.current,
+    );
+
+    final fittedCamera = await mapboxMap.cameraForCoordinatesPadding(
+      [pointA, pointB],
+      CameraOptions(
+        center: cameraState.center,
+        zoom: cameraState.zoom,
+        bearing: cameraState.bearing,
+        pitch: cameraState.pitch,
+      ),
+      MbxEdgeInsets(top: 80, left: 80, bottom: 80, right: 80),
+      12,
+      null,
+    );
+    await mapboxMap.setCamera(fittedCamera);
   }
 
   Future<void> _clearGuessLine() async {
@@ -347,12 +404,29 @@ class _MapScreenState extends State<MapScreen> {
     final mapboxMap = _mapboxMap;
     final clickedPoint = _lastClickedPoint;
     final targetPlace = _targetPlace;
+
+    debugPrint(
+      '[guess-line] update: styleLoaded=$_isStyleLoaded, '
+      'map=${mapboxMap != null}, clicked=$clickedPoint, target=$targetPlace',
+    );
+
     if (mapboxMap == null || !_isStyleLoaded) return;
 
     final source = await mapboxMap.getSource(_guessLineSourceId);
     if (source is! GeoJsonSource) {
       throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
     }
+
+    final clicked = clickedPoint?.coordinates;
+    final target = targetPlace?.point.coordinates;
+    final layerExists = await mapboxMap.styleLayerExists(_guessLineLayerId);
+    final dynamicData = await source.dynamicData;
+
+    debugPrint(
+      '[guess-line] clicked=(${clicked?.lng}, ${clicked?.lat}), '
+      'target=(${target?.lng}, ${target?.lat}), '
+      'layerExists=$layerExists, dynamicData=$dynamicData',
+    );
 
     final features = clickedPoint == null || targetPlace == null
         ? <Map<String, dynamic>>[]
@@ -369,9 +443,42 @@ class _MapScreenState extends State<MapScreen> {
               'properties': <String, dynamic>{},
             },
           ];
+    debugPrint('[guess-line] features=${features.length}');
+
     await source.updateGeoJSON(
       jsonEncode({'type': 'FeatureCollection', 'features': features}),
     );
+
+    developer.log(
+      'GeoJSON updated with ${features.length} features.',
+      name: 'guess-line',
+      level: Level.INFO.value,
+      stackTrace: StackTrace.current,
+    );
+
+    for (final property in ['visibility', 'line-color', 'line-width', 'line-opacity']) {
+      final value = await mapboxMap.getStyleLayerProperty(
+        _guessLineLayerId,
+        property,
+      );
+      debugPrint('[guess-line] $property=${value.value}');
+    }
+
+    final layerSource = await mapboxMap.getStyleLayerProperty(
+      _guessLineLayerId,
+      'source',
+    );
+    final layerType = await mapboxMap.getStyleLayerProperty(
+      _guessLineLayerId,
+      'type',
+    );
+    final sourceData = await mapboxMap.getStyleSourceProperty(
+      _guessLineSourceId,
+      'data',
+    );
+
+    debugPrint('[guess-line] layer source=${layerSource.value}, type=${layerType.value}');
+    debugPrint('[guess-line] source data=${sourceData.value}');
   }
 
   Future<void> _renderSelectedPlaces() async {

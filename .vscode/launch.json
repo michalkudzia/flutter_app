@@ -2,6 +2,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Mapbox Sandbox (Node.js)",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/devtools/js/mapsandbox.js",
+            "cwd": "${workspaceFolder}",
+            "runtimeArgs": [
+                "--watch"
+            ],
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
+        },
+
+        {
             "name": "Flutter",
             "type": "dart",
             "request": "launch",
