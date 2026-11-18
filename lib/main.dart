@@ -313,10 +313,10 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _ensureGuessLineLayer(MapboxMap mapboxMap) async {
+    /*
     final cameraState = await mapboxMap.getCameraState();
     final center = cameraState.center.coordinates;
 
-    /*
     final pointA = Point(
       coordinates: Position(center.lng - 0.5, center.lat - 0.5),
     );
