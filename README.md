@@ -1,6 +1,6 @@
 # mapinsider_flutter_app
 
-A new Flutter project.
+The MapInsider Flutter project.
 
 ## Getting Started
 
