@@ -2,19 +2,24 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 3000;
+const PORT = Number(process.env.MAP_SANDBOX_PORT || 3000);
+
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  console.error(`Nieprawidłowy port "${process.env.MAP_SANDBOX_PORT}". Ustaw MAP_SANDBOX_PORT na liczbę od 1 do 65535.`);
+  process.exit(1);
+}
 
 // 1. Wczytanie tokena:
 // Wychodzimy z "js" (..), potem z "devtools" (..) i wchodzimy do "assets/config.json"
 const configPath = path.join(__dirname, '..', '..', 'assets', 'config.json');
-let MAPBOX_TOKEN = '';
+let mapboxAccessToken = '';
 
 try {
   const rawConfig = fs.readFileSync(configPath, 'utf-8');
   const config = JSON.parse(rawConfig);
-  MAPBOX_TOKEN = config.mapbox_access_token;
+  mapboxAccessToken = config.mapbox_access_token;
 
-  if (!MAPBOX_TOKEN) {
+  if (!mapboxAccessToken) {
     throw new Error('Brak pola "mapbox_access_token" lub jest ono puste.');
   }
 } catch (err) {
@@ -27,20 +32,14 @@ try {
 const htmlPath = path.join(__dirname, 'mapsandbox.html');
 const clientScriptPath = path.join(__dirname, 'mapsandbox-client.js');
 let htmlContent;
-let clientScriptTemplate;
+let clientScript;
 
 try {
   htmlContent = fs.readFileSync(htmlPath, 'utf-8');
-  clientScriptTemplate = fs.readFileSync(clientScriptPath, 'utf-8');
+  clientScript = fs.readFileSync(clientScriptPath, 'utf-8');
 } catch (err) {
   console.error('Błąd wczytywania plików sandboxa:');
   console.error(err.message);
-  process.exit(1);
-}
-
-const tokenPlaceholder = '__MAPBOX_ACCESS_TOKEN__';
-if (!clientScriptTemplate.includes(tokenPlaceholder)) {
-  console.error(`Nie znaleziono placeholdera ${tokenPlaceholder} w ${clientScriptPath}.`);
   process.exit(1);
 }
 
@@ -50,16 +49,27 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(htmlContent);
   } else if (req.url === '/mapsandbox-client.js') {
-    const clientScript = clientScriptTemplate.replace(
-      tokenPlaceholder,
-      JSON.stringify(MAPBOX_TOKEN),
-    );
     res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
     res.end(clientScript);
+  } else if (req.url === '/mapbox-config.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ mapboxAccessToken }));
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('404 - Nie znaleziono strony');
   }
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} jest już zajęty. Zatrzymaj poprzedni serwer sandboxa albo ustaw MAP_SANDBOX_PORT na inny port.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.error('Nie udało się uruchomić serwera HTTP:');
+  console.error(err);
+  process.exitCode = 1;
 });
 
 server.listen(PORT, () => {
