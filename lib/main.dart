@@ -1,15 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:math' as math;
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:material_ui/material_ui.dart';
-import 'package:logging/logging.dart' show Level;
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+
+import 'guess_line_layer.dart';
+import 'map_markers.dart';
 
 double calculateStraightLineDistanceKm(Point target, Point clickedPoint) {
   const earthRadiusKm = 6371.0088;
@@ -163,11 +161,6 @@ class _Place {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  static const _placesSourceId = 'city-places-source';
-  static const _placesLayerId = 'city-places-layer';
-  static const _guessLineSourceId = 'guess-line-source';
-  static const _guessLineLayerId = 'guess-line-layer';
-  static const _guessLinePointsLayerId = 'guess-line-points-layer';
   static const _cityDataFiles = {
     'Warszawa': 'warszawa.json',
     'Paryż': 'paris.json',
@@ -184,12 +177,11 @@ class _MapScreenState extends State<MapScreen> {
   };
 
   MapboxMap? _mapboxMap;
-  PointAnnotationManager? _pointAnnotationManager;
-  PointAnnotationManager? _placeAnnotationManager;
+  final _mapMarkers = MapMarkers();
+  final _guessLineLayer = GuessLineLayer();
   Map<String, List<_Place>>? _placesByCategory;
   bool _isStyleLoaded = false;
   final math.Random _random = math.Random();
-  Uint8List? _markerImage;
   String _selectedCity = 'Londyn';
   String _selectedCategory = 'beginner';
   _Place? _targetPlace;
@@ -231,15 +223,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
-    _pointAnnotationManager = await mapboxMap.annotations.createPointAnnotationManager();
-    if (!kIsWeb) {
-      _placeAnnotationManager = await mapboxMap.annotations.createPointAnnotationManager();
-    }
-
-    debugPrint('PointAnnotationManager created: $_pointAnnotationManager');
-
-    _markerImage = await _createMarkerImage();
-    debugPrint('Marker image created with size: ${_markerImage?.lengthInBytes} bytes');
+    await _mapMarkers.onMapCreated(mapboxMap);
     mapboxMap.addInteraction(
       TapInteraction.onMap((context) {
         unawaited(_addMarker(mapboxMap, context.point));
@@ -256,15 +240,8 @@ class _MapScreenState extends State<MapScreen> {
     if (mapboxMap == null) return;
     _isStyleLoaded = false;
 
-    final markerImage = _markerImage ?? await _createMarkerImage();
-    _markerImage = markerImage;
-
-    await mapboxMap.addImage(
-      'custom-icon-id',
-      1.0,
-      StyleImage.bytes(markerImage),
-    );
-    await _ensureGuessLineLayer(mapboxMap);
+    await _mapMarkers.onStyleLoaded(mapboxMap);
+    await _guessLineLayer.onStyleLoaded(mapboxMap);
 
     _isStyleLoaded = true;
     final requestVersion = ++_citySelectionVersion;
@@ -312,210 +289,17 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  Future<void> _ensureGuessLineLayer(MapboxMap mapboxMap) async {
-    /*
-    final cameraState = await mapboxMap.getCameraState();
-    final center = cameraState.center.coordinates;
-
-    final pointA = Point(
-      coordinates: Position(center.lng - 0.5, center.lat - 0.5),
-    );
-    final pointB = Point(
-      coordinates: Position(center.lng + 0.5, center.lat + 0.5),
-    );
-    */
-
-    final existingSource = await mapboxMap.getSource(_guessLineSourceId);
-    if (existingSource == null) {
-      await mapboxMap.addSource(
-        GeoJsonSource(
-          id: _guessLineSourceId,
-          data: jsonEncode({'type': 'FeatureCollection', 'features': []}),
-        ),
-      );
-    } else if (existingSource is! GeoJsonSource) {
-      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
-    }
-
-    if (await mapboxMap.styleLayerExists(_guessLineLayerId)) {
-      await mapboxMap.removeStyleLayer(_guessLineLayerId);
-    }
-    if (await mapboxMap.styleLayerExists(_guessLinePointsLayerId)) {
-      await mapboxMap.removeStyleLayer(_guessLinePointsLayerId);
-    }
-    await mapboxMap.addLayer(
-      LineLayer(
-        id: _guessLineLayerId,
-        sourceId: _guessLineSourceId,
-        lineCap: LineCap.ROUND,
-        lineColor: const Color(0xFF0066CC).toARGB32(),
-        lineJoin: LineJoin.ROUND,
-        lineWidth: 4,
-      ),
-    );
-    await mapboxMap.addLayer(
-      CircleLayer(
-        id: _guessLinePointsLayerId,
-        sourceId: _guessLineSourceId,
-        circleRadius: 9,
-        circleColorExpression: const [
-          'match',
-          ['get', 'label'],
-          'A',
-          '#2a9d8f',
-          'B',
-          '#e76f51',
-          '#000000',
-        ],
-        circleStrokeColor: Colors.white.toARGB32(),
-        circleStrokeWidth: 2,
-      ),
-    );
-
-    final source = await mapboxMap.getSource(_guessLineSourceId);
-    if (source is! GeoJsonSource) {
-      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
-    }
-
-    /*
-    await source.updateGeoJSON(
-      jsonEncode({
-        'type': 'FeatureCollection',
-        'features': [
-          {
-            'type': 'Feature',
-            'geometry': {
-              'type': 'LineString',
-              'coordinates': [
-                [pointA.coordinates.lng, pointA.coordinates.lat],
-                [pointB.coordinates.lng, pointB.coordinates.lat],
-              ],
-            },
-            'properties': <String, dynamic>{},
-          },
-          {
-            'type': 'Feature',
-            'geometry': pointA.toJson(),
-            'properties': {'label': 'A'},
-          },
-          {
-            'type': 'Feature',
-            'geometry': pointB.toJson(),
-            'properties': {'label': 'B'},
-          },
-        ],
-      }),
-    );
-    */
-    developer.log(
-      'Guess line layer $_guessLineLayerId initialized with sample data.',
-      name: 'guess-line',
-      level: Level.INFO.value,
-      stackTrace: StackTrace.current,
-    );
-
-    /*
-    final fittedCamera = await mapboxMap.cameraForCoordinatesPadding(
-      [pointA, pointB],
-      CameraOptions(
-        center: cameraState.center,
-        zoom: cameraState.zoom,
-        bearing: cameraState.bearing,
-        pitch: cameraState.pitch,
-      ),
-      MbxEdgeInsets(top: 80, left: 80, bottom: 80, right: 80),
-      12,
-      null,
-    );
-    await mapboxMap.setCamera(fittedCamera);
-    */
-  }
-
   Future<void> _clearGuessLine() async {
     _lastClickedPoint = null;
-    if (!_isStyleLoaded) return;
-    await _updateGuessLine();
+    await _guessLineLayer.clear(_mapboxMap);
   }
 
   Future<void> _updateGuessLine() async {
-    final mapboxMap = _mapboxMap;
-    final clickedPoint = _lastClickedPoint;
-    final targetPlace = _targetPlace;
-
-    debugPrint(
-      '[guess-line] update: styleLoaded=$_isStyleLoaded, '
-      'map=${mapboxMap != null}, clicked=$clickedPoint, target=$targetPlace',
+    await _guessLineLayer.update(
+      _mapboxMap,
+      clickedPoint: _lastClickedPoint,
+      targetPoint: _targetPlace?.point,
     );
-
-    if (mapboxMap == null || !_isStyleLoaded) return;
-
-    final source = await mapboxMap.getSource(_guessLineSourceId);
-    if (source is! GeoJsonSource) {
-      throw StateError('Źródło $_guessLineSourceId nie jest źródłem GeoJSON.');
-    }
-
-    final clicked = clickedPoint?.coordinates;
-    final target = targetPlace?.point.coordinates;
-    final layerExists = await mapboxMap.styleLayerExists(_guessLineLayerId);
-    final dynamicData = await source.dynamicData;
-
-    debugPrint(
-      '[guess-line] clicked=(${clicked?.lng}, ${clicked?.lat}), '
-      'target=(${target?.lng}, ${target?.lat}), '
-      'layerExists=$layerExists, dynamicData=$dynamicData',
-    );
-
-    final features = clickedPoint == null || targetPlace == null
-        ? <Map<String, dynamic>>[]
-        : [
-            {
-              'type': 'Feature',
-              'geometry': {
-                'type': 'LineString',
-                'coordinates': [
-                  [clickedPoint.coordinates.lng, clickedPoint.coordinates.lat],
-                  [targetPlace.point.coordinates.lng, targetPlace.point.coordinates.lat],
-                ],
-              },
-              'properties': <String, dynamic>{},
-            },
-          ];
-    debugPrint('[guess-line] features=${features.length}');
-
-    await source.updateGeoJSON(
-      jsonEncode({'type': 'FeatureCollection', 'features': features}),
-    );
-
-    developer.log(
-      'GeoJSON updated with ${features.length} features.',
-      name: 'guess-line',
-      level: Level.INFO.value,
-      stackTrace: StackTrace.current,
-    );
-
-    for (final property in ['visibility', 'line-color', 'line-width', 'line-opacity']) {
-      final value = await mapboxMap.getStyleLayerProperty(
-        _guessLineLayerId,
-        property,
-      );
-      debugPrint('[guess-line] $property=${value.value}');
-    }
-
-    final layerSource = await mapboxMap.getStyleLayerProperty(
-      _guessLineLayerId,
-      'source',
-    );
-    final layerType = await mapboxMap.getStyleLayerProperty(
-      _guessLineLayerId,
-      'type',
-    );
-    final sourceData = await mapboxMap.getStyleSourceProperty(
-      _guessLineSourceId,
-      'data',
-    );
-
-    debugPrint('[guess-line] layer source=${layerSource.value}, type=${layerType.value}');
-    debugPrint('[guess-line] source data=${sourceData.value}');
   }
 
   Future<void> _renderSelectedPlaces() async {
@@ -523,73 +307,16 @@ class _MapScreenState extends State<MapScreen> {
     final placesByCategory = _placesByCategory;
     if (mapboxMap == null || placesByCategory == null) return;
 
-    final markerImage = _markerImage;
-    if (markerImage == null) {
-      throw StateError('Obraz markera nie został jeszcze utworzony.');
-    }
-
     final dataKey = _categoryDataKeys[_selectedCategory]!;
     final places = placesByCategory[dataKey];
     if (places == null) {
       throw StateError('Plik dla miasta "$_selectedCity" nie zawiera kategorii "$dataKey".');
     }
 
-    if (kIsWeb) {
-      final geoJson = jsonEncode({
-        'type': 'FeatureCollection',
-        'features': places
-            .map(
-              (place) => {
-                'type': 'Feature',
-                'geometry': place.point.toJson(),
-                'properties': <String, dynamic>{},
-              },
-            )
-            .toList(),
-      });
-
-      final existingSource = await mapboxMap.getSource(_placesSourceId);
-      if (existingSource is GeoJsonSource) {
-        await existingSource.updateGeoJSON(geoJson);
-      } else if (existingSource == null) {
-        await mapboxMap.addSource(
-          GeoJsonSource(id: _placesSourceId, data: geoJson),
-        );
-      } else {
-        throw StateError('Źródło $_placesSourceId nie jest źródłem GeoJSON.');
-      }
-
-      if (!await mapboxMap.styleLayerExists(_placesLayerId)) {
-        await mapboxMap.addLayer(
-          SymbolLayer(
-            id: _placesLayerId,
-            sourceId: _placesSourceId,
-            iconImage: 'custom-icon-id',
-            iconAllowOverlap: true,
-          ),
-        );
-      }
-    } else {
-      final annotationManager = _placeAnnotationManager;
-      if (annotationManager == null) {
-        throw StateError('Menedżer markerów miejsc nie został zainicjalizowany.');
-      }
-
-      await annotationManager.deleteAll();
-      await annotationManager.setIconAllowOverlap(true);
-      await annotationManager.createMulti(
-        places
-            .map(
-              (place) => PointAnnotationOptions(
-                geometry: place.point,
-                image: markerImage,
-                iconAnchor: IconAnchor.BOTTOM,
-                iconSize: 0.7,
-              ),
-            )
-            .toList(),
-      );
-    }
+    await _mapMarkers.renderPlaces(
+      mapboxMap,
+      places.map((place) => place.point).toList(),
+    );
   }
 
   Future<Map<String, List<_Place>>> _loadCityPlaces(String city) async {
@@ -646,11 +373,7 @@ class _MapScreenState extends State<MapScreen> {
 
   // Adds a marker at a tapped location.
   Future<void> _addMarker(MapboxMap mapboxMap, Point point) async {
-    final annotationManager = _pointAnnotationManager;
-    final markerImage = _markerImage;
     debugPrint('Adding marker at position: $point');
-
-    if (annotationManager == null || markerImage == null) return;
 
     final targetPlace = _targetPlace;
     if (targetPlace != null) {
@@ -662,67 +385,9 @@ class _MapScreenState extends State<MapScreen> {
     }
     _lastClickedPoint = point;
 
-    // Check for Web platform if needed to branch logic
-    if (kIsWeb) {
-      final sourceId = "marker-source";
-      GeoJsonSource? existingSource = await mapboxMap.getSource(sourceId) as GeoJsonSource?;
-
-      debugPrint('Existing source | type: ${existingSource.runtimeType}, value: $existingSource');
-
-      final geoJson = jsonEncode({
-        'type': 'Feature',
-        'geometry': point.toJson(),
-        'properties': {},
-      });
-
-      if (existingSource != null) {
-        await existingSource.updateGeoJSON(geoJson);
-      } else {
-        await mapboxMap.addSource(
-          GeoJsonSource(id: sourceId, data: geoJson),
-        );
-        await mapboxMap.addLayer(SymbolLayer(id: sourceId, sourceId: sourceId, iconImage: "custom-icon-id"));
-      }
-    } else {
-      // Mobile might still work with PointAnnotationManager
-      await annotationManager.create(
-        PointAnnotationOptions(geometry: point, image: markerImage, iconAnchor: IconAnchor.BOTTOM, iconSize: 0.7),
-      );
-    }
+    await _mapMarkers.addTapMarker(mapboxMap, point);
 
     await _updateGuessLine();
-  }
-
-  Future<Uint8List> _createMarkerImage() async {
-    const size = 64.0;
-    final recorder = ui.PictureRecorder();
-    final canvas = ui.Canvas(recorder);
-    final markerPaint = Paint()..color = Colors.red;
-    final markerPath = Path()
-      ..moveTo(32, 60)
-      ..lineTo(16, 32)
-      ..arcToPoint(const Offset(48, 32), radius: const Radius.circular(16), clockwise: false)
-      ..close();
-
-    debugPrint('Creating marker image with size: $size');
-
-    canvas.drawPath(markerPath, markerPaint);
-    canvas.drawCircle(const Offset(32, 25), 10, Paint()..color = Colors.white);
-
-    final image = await recorder.endRecording().toImage(size.toInt(), size.toInt());
-
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    image.dispose();
-
-    debugPrint('Marker image created with dimensions: ${image.width}x${image.height}');
-    debugPrint('Marker image created with size: ${byteData?.lengthInBytes} bytes');
-    debugPrint('Marker image created with format: ${ui.ImageByteFormat.png}');
-    debugPrint('Marker image created with color: ${markerPaint.color}');
-
-    if (byteData == null) {
-      throw StateError('Nie udało się wygenerować obrazu markera.');
-    }
-    return byteData.buffer.asUint8List();
   }
 
   @override
