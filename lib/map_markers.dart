@@ -4,8 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
-import 'package:material_ui/material_ui.dart'
-    show BuildContext, Colors, Offset, Paint, Path, Radius, ScaffoldMessenger, SnackBar, Text;
+import 'package:material_ui/material_ui.dart' show Colors, Offset, Paint, Path, Radius;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 double calculateStraightLineDistanceKm(Point target, Point clickedPoint) {
@@ -107,30 +106,6 @@ final class MapMarkers {
         iconSize: 0.7,
       ),
     );
-  }
-
-  Future<void> addMarker({
-    required BuildContext context,
-    required MapboxMap mapboxMap,
-    required Point point,
-    required Point? targetPoint,
-    required void Function(Point) onPointSelected,
-    required Future<void> Function() updateGuessLine,
-  }) async {
-    debugPrint('Adding marker at position: $point');
-
-    if (targetPoint != null) {
-      final distanceKm = calculateStraightLineDistanceKm(targetPoint, point);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text('Odległość w linii prostej: ${distanceKm.toStringAsFixed(2)} km')),
-        );
-    }
-
-    onPointSelected(point);
-    await addTapMarker(mapboxMap, point);
-    await updateGuessLine();
   }
 
   Future<void> renderPlaces(

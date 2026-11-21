@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
+import 'game_core.dart';
 import 'guess_line_layer.dart';
 import 'map_markers.dart';
 
@@ -149,14 +149,18 @@ class _MapScreenState extends State<MapScreen> {
   };
 
   MapboxMap? _mapboxMap;
+  final _game = TopoGuessGame();
   final _mapMarkers = MapMarkers();
   final _guessLineLayer = GuessLineLayer();
   Map<String, List<_Place>>? _placesByCategory;
   bool _isStyleLoaded = false;
-  final math.Random _random = math.Random();
   String _selectedCity = 'Londyn';
   String _selectedCategory = 'beginner';
-  _Place? _targetPlace;
+  List<_Place> _remainingTargets = [];
+  _Place? _selectedTarget;
+  int _targetCount = 1;
+  final _guessTimer = Stopwatch();
+  bool _isSubmittingGuess = false;
   int _citySelectionVersion = 0;
 
   Future<void> _selectCity(String city) async {
@@ -176,9 +180,8 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _selectedCity = city;
       _placesByCategory = placesByCategory;
-      _targetPlace = places[_random.nextInt(places.length)];
     });
-    await _guessLineLayer.clear(_mapboxMap);
+    await _startNewRound();
 
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
@@ -197,19 +200,7 @@ class _MapScreenState extends State<MapScreen> {
     await _mapMarkers.onMapCreated(mapboxMap);
     mapboxMap.addInteraction(
       TapInteraction.onMap((context) {
-        unawaited(
-          _mapMarkers.addMarker(
-            mapboxMap: mapboxMap,
-            point: context.point,
-            context: this.context,
-            targetPoint: _targetPlace?.point,
-            onPointSelected: _guessLineLayer.setClickedPoint,
-            updateGuessLine: () => _guessLineLayer.update(
-              _mapboxMap,
-              targetPoint: _targetPlace?.point,
-            ),
-          ),
-        );
+        unawaited(_handleMapTap(mapboxMap, context.point));
       }),
     );
 
@@ -232,7 +223,7 @@ class _MapScreenState extends State<MapScreen> {
     final placesByCategory = await _loadCityPlaces(city);
     if (!mounted || requestVersion != _citySelectionVersion) return;
     _placesByCategory = placesByCategory;
-    _chooseRandomTarget(_selectedCategory);
+    await _startNewRound();
     await _renderSelectedPlaces();
   }
 
@@ -241,35 +232,109 @@ class _MapScreenState extends State<MapScreen> {
       throw StateError('Nieznana kategoria miejsc "$category".');
     }
 
-    final places = _placesByCategory?[_categoryDataKeys[category]!];
+    final placesByCategory = _placesByCategory;
+    final places = placesByCategory?[_categoryDataKeys[category]!];
     if (places != null && places.isEmpty) {
       throw StateError('Kategoria "$category" nie zawiera miejsc do odgadnięcia.');
     }
 
-    setState(() {
-      _selectedCategory = category;
-      _targetPlace = places == null ? null : places[_random.nextInt(places.length)];
-    });
-
-    await _guessLineLayer.clear(_mapboxMap);
+    setState(() => _selectedCategory = category);
+    await _startNewRound();
     await _renderSelectedPlaces();
   }
 
-  void _chooseRandomTarget(String category) {
-    final dataKey = _categoryDataKeys[category];
-    if (dataKey == null) {
-      throw StateError('Nieznana kategoria miejsc "$category".');
+  Future<void> _startNewRound({int? targetCount}) async {
+    final placesByCategory = _placesByCategory;
+    final places = placesByCategory?[_categoryDataKeys[_selectedCategory]!];
+    if (placesByCategory == null || places == null || places.isEmpty) {
+      _game.reset();
+      _guessTimer
+        ..stop()
+        ..reset();
+      setState(() {
+        _remainingTargets = [];
+        _selectedTarget = null;
+        _targetCount = 1;
+      });
+      await _guessLineLayer.clear(_mapboxMap);
+      return;
     }
 
-    final places = _placesByCategory?[dataKey];
-    if (places == null || places.isEmpty) {
-      throw StateError('Brak miejsc do odgadnięcia dla kategorii "$category".');
-    }
-
+    final count = (targetCount ?? _targetCount).clamp(1, places.length).toInt();
+    final targets = _game.chooseRandomTargets(
+      category: _selectedCategory,
+      count: count,
+      categoryDataKeys: _categoryDataKeys,
+      placesByCategory: placesByCategory,
+    );
+    _game.reset();
+    _guessTimer
+      ..stop()
+      ..reset()
+      ..start();
     setState(() {
-      _targetPlace = places[_random.nextInt(places.length)];
+      _targetCount = count;
+      _remainingTargets = targets;
+      _selectedTarget = targets.first;
     });
-    _guessLineLayer.clearClickedPoint();
+    await _guessLineLayer.clear(_mapboxMap);
+  }
+
+  Future<void> _selectTarget(_Place target) async {
+    setState(() => _selectedTarget = target);
+    _guessTimer
+      ..stop()
+      ..reset()
+      ..start();
+    await _guessLineLayer.clear(_mapboxMap);
+  }
+
+  Future<void> _handleMapTap(MapboxMap mapboxMap, Point clickedPoint) async {
+    final target = _selectedTarget;
+    if (target == null || _isSubmittingGuess) return;
+
+    setState(() => _isSubmittingGuess = true);
+    try {
+      final elapsed = _guessTimer.elapsed;
+      await _mapMarkers.addTapMarker(mapboxMap, clickedPoint);
+      _guessLineLayer.setClickedPoint(clickedPoint);
+      await _guessLineLayer.update(mapboxMap, targetPoint: target.point);
+
+      final isFinalGuess = _remainingTargets.length == 1;
+      final result = _game.submitPlaceGuess(
+        targetLat: target.point.coordinates.lat.toDouble(),
+        targetLon: target.point.coordinates.lng.toDouble(),
+        userLat: clickedPoint.coordinates.lat.toDouble(),
+        userLon: clickedPoint.coordinates.lng.toDouble(),
+        elapsed: elapsed,
+        isFinalGuess: isFinalGuess,
+      );
+      final distanceKm = result.distanceMeters / 1000;
+      final remainingTargets = _remainingTargets.where((place) => place != target).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _remainingTargets = remainingTargets;
+        _selectedTarget = remainingTargets.isEmpty ? null : remainingTargets.first;
+      });
+      _guessTimer
+        ..stop()
+        ..reset();
+      if (remainingTargets.isNotEmpty) _guessTimer.start();
+
+      final message = remainingTargets.isEmpty
+          ? 'Odległość: ${distanceKm.toStringAsFixed(2)} km • ${result.points} pkt. Wynik końcowy: ${result.totalScore} pkt.'
+          : 'Odległość: ${distanceKm.toStringAsFixed(2)} km • Zdobyto: ${result.points} pkt.';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingGuess = false);
+      } else {
+        _isSubmittingGuess = false;
+      }
+    }
   }
 
   Future<void> _renderSelectedPlaces() async {
@@ -343,6 +408,8 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final availablePlaceCount = _placesByCategory?[_categoryDataKeys[_selectedCategory]!]?.length ?? 0;
+
     return Scaffold(
       appBar: AppBar(title: const Text('MapInsider')),
       body: LayoutBuilder(
@@ -369,18 +436,50 @@ class _MapScreenState extends State<MapScreen> {
                             DropdownMenuItem(value: 'advanced', child: Text('advanced')),
                             DropdownMenuItem(value: 'expert', child: Text('expert')),
                           ],
-                          onChanged: (category) async {
-                            if (category != null) await _selectCategory(category);
-                          },
+                          onChanged: _isSubmittingGuess
+                              ? null
+                              : (category) async {
+                                  if (category != null) await _selectCategory(category);
+                                },
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
+                        Text('Number of places', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        DropdownButton<int>(
+                          value: availablePlaceCount == 0 ? null : _targetCount,
+                          isExpanded: true,
+                          items: List.generate(
+                            availablePlaceCount,
+                            (index) => DropdownMenuItem(
+                              value: index + 1,
+                              child: Text('${index + 1}'),
+                            ),
+                          ),
+                          onChanged: availablePlaceCount == 0 || _isSubmittingGuess
+                              ? null
+                              : (count) async {
+                                  if (count != null) await _startNewRound(targetCount: count);
+                                },
+                        ),
+                        const SizedBox(height: 16),
                         Text('Place to guess', style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 8),
-                        Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text(_targetPlace?.name ?? 'Loading place...'),
-                          ),
+                        DropdownButton<_Place>(
+                          value: _selectedTarget,
+                          isExpanded: true,
+                          items: _remainingTargets
+                              .map(
+                                (place) => DropdownMenuItem(
+                                  value: place,
+                                  child: Text(place.name, overflow: TextOverflow.ellipsis),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: _isSubmittingGuess
+                              ? null
+                              : (place) async {
+                                  if (place != null) await _selectTarget(place);
+                                },
                         ),
                       ],
                     ),
@@ -404,7 +503,7 @@ class _MapScreenState extends State<MapScreen> {
                             label: Text(city),
                             selected: _selectedCity == city,
                             onSelected: (selected) async {
-                              if (selected) await _selectCity(city);
+                              if (selected && !_isSubmittingGuess) await _selectCity(city);
                             },
                           );
                         },
