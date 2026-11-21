@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' show Point, Position;
-import 'package:mapinsider_flutter_app/main.dart' show calculateStraightLineDistanceKm;
+import 'package:mapinsider_flutter_app/map_markers.dart' show calculateStraightLineDistanceKm;
 
 void main() {
   test('returns zero for the same point', () {

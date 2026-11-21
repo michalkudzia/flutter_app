@@ -9,34 +9,6 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'guess_line_layer.dart';
 import 'map_markers.dart';
 
-double calculateStraightLineDistanceKm(Point target, Point clickedPoint) {
-  const earthRadiusKm = 6371.0088;
-  final targetLatitude = target.coordinates.lat * math.pi / 180;
-  final clickedLatitude = clickedPoint.coordinates.lat * math.pi / 180;
-  final latitudeDelta = clickedLatitude - targetLatitude;
-  final longitudeDelta = (clickedPoint.coordinates.lng - target.coordinates.lng) * math.pi / 180;
-
-  final haversine =
-      math.pow(math.sin(latitudeDelta / 2), 2) +
-      math.cos(targetLatitude) * math.cos(clickedLatitude) * math.pow(math.sin(longitudeDelta / 2), 2);
-  final normalizedHaversine = haversine.clamp(0.0, 1.0);
-
-  return 2 * earthRadiusKm * math.asin(math.sqrt(normalizedHaversine));
-}
-
-void showStraightLineDistanceSnackbar({
-  required BuildContext context,
-  required Point target,
-  required Point clickedPoint,
-}) {
-  final distanceKm = calculateStraightLineDistanceKm(target, clickedPoint);
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(content: Text('Odległość w linii prostej: ${distanceKm.toStringAsFixed(2)} km')),
-    );
-}
-
 class _LoadedMapConfig {
   const _LoadedMapConfig({required this.token, required this.cityViewports});
 
@@ -185,7 +157,6 @@ class _MapScreenState extends State<MapScreen> {
   String _selectedCity = 'Londyn';
   String _selectedCategory = 'beginner';
   _Place? _targetPlace;
-  Point? _lastClickedPoint;
   int _citySelectionVersion = 0;
 
   Future<void> _selectCity(String city) async {
@@ -207,7 +178,7 @@ class _MapScreenState extends State<MapScreen> {
       _placesByCategory = placesByCategory;
       _targetPlace = places[_random.nextInt(places.length)];
     });
-    await _clearGuessLine();
+    await _guessLineLayer.clear(_mapboxMap);
 
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
@@ -226,7 +197,19 @@ class _MapScreenState extends State<MapScreen> {
     await _mapMarkers.onMapCreated(mapboxMap);
     mapboxMap.addInteraction(
       TapInteraction.onMap((context) {
-        unawaited(_addMarker(mapboxMap, context.point));
+        unawaited(
+          _mapMarkers.addMarker(
+            mapboxMap: mapboxMap,
+            point: context.point,
+            context: this.context,
+            targetPoint: _targetPlace?.point,
+            onPointSelected: _guessLineLayer.setClickedPoint,
+            updateGuessLine: () => _guessLineLayer.update(
+              _mapboxMap,
+              targetPoint: _targetPlace?.point,
+            ),
+          ),
+        );
       }),
     );
 
@@ -268,7 +251,7 @@ class _MapScreenState extends State<MapScreen> {
       _targetPlace = places == null ? null : places[_random.nextInt(places.length)];
     });
 
-    await _clearGuessLine();
+    await _guessLineLayer.clear(_mapboxMap);
     await _renderSelectedPlaces();
   }
 
@@ -285,21 +268,8 @@ class _MapScreenState extends State<MapScreen> {
 
     setState(() {
       _targetPlace = places[_random.nextInt(places.length)];
-      _lastClickedPoint = null;
     });
-  }
-
-  Future<void> _clearGuessLine() async {
-    _lastClickedPoint = null;
-    await _guessLineLayer.clear(_mapboxMap);
-  }
-
-  Future<void> _updateGuessLine() async {
-    await _guessLineLayer.update(
-      _mapboxMap,
-      clickedPoint: _lastClickedPoint,
-      targetPoint: _targetPlace?.point,
-    );
+    _guessLineLayer.clearClickedPoint();
   }
 
   Future<void> _renderSelectedPlaces() async {
@@ -369,25 +339,6 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     return placesByCategory;
-  }
-
-  // Adds a marker at a tapped location.
-  Future<void> _addMarker(MapboxMap mapboxMap, Point point) async {
-    debugPrint('Adding marker at position: $point');
-
-    final targetPlace = _targetPlace;
-    if (targetPlace != null) {
-      showStraightLineDistanceSnackbar(
-        context: context,
-        target: targetPlace.point,
-        clickedPoint: point,
-      );
-    }
-    _lastClickedPoint = point;
-
-    await _mapMarkers.addTapMarker(mapboxMap, point);
-
-    await _updateGuessLine();
   }
 
   @override

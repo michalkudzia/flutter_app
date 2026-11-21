@@ -12,6 +12,7 @@ final class GuessLineLayer {
   static const _pointsLayerId = 'guess-line-points-layer';
 
   bool _isStyleLoaded = false;
+  Point? _clickedPoint;
 
   Future<void> onStyleLoaded(MapboxMap mapboxMap) async {
     _isStyleLoaded = false;
@@ -19,18 +20,27 @@ final class GuessLineLayer {
     _isStyleLoaded = true;
   }
 
+  void setClickedPoint(Point point) {
+    _clickedPoint = point;
+  }
+
+  void clearClickedPoint() {
+    _clickedPoint = null;
+  }
+
   Future<void> clear(MapboxMap? mapboxMap) async {
+    clearClickedPoint();
     if (mapboxMap == null || !_isStyleLoaded) return;
     await update(mapboxMap);
   }
 
   Future<void> update(
     MapboxMap? mapboxMap, {
-    Point? clickedPoint,
     Point? targetPoint,
   }) async {
     if (mapboxMap == null || !_isStyleLoaded) return;
 
+    final clickedPoint = _clickedPoint;
     final source = await mapboxMap.getSource(_sourceId);
     if (source is! GeoJsonSource) {
       throw StateError('Źródło $_sourceId nie jest źródłem GeoJSON.');

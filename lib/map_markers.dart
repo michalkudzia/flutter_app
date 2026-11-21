@@ -1,10 +1,27 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
-import 'package:material_ui/material_ui.dart' show Colors, Offset, Paint, Path, Radius;
+import 'package:material_ui/material_ui.dart'
+    show BuildContext, Colors, Offset, Paint, Path, Radius, ScaffoldMessenger, SnackBar, Text;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+
+double calculateStraightLineDistanceKm(Point target, Point clickedPoint) {
+  const earthRadiusKm = 6371.0088;
+  final targetLatitude = target.coordinates.lat * math.pi / 180;
+  final clickedLatitude = clickedPoint.coordinates.lat * math.pi / 180;
+  final latitudeDelta = clickedLatitude - targetLatitude;
+  final longitudeDelta = (clickedPoint.coordinates.lng - target.coordinates.lng) * math.pi / 180;
+
+  final haversine =
+      math.pow(math.sin(latitudeDelta / 2), 2) +
+      math.cos(targetLatitude) * math.cos(clickedLatitude) * math.pow(math.sin(longitudeDelta / 2), 2);
+  final normalizedHaversine = haversine.clamp(0.0, 1.0);
+
+  return 2 * earthRadiusKm * math.asin(math.sqrt(normalizedHaversine));
+}
 
 final class MapMarkers {
   static const _placesSourceId = 'city-places-source';
@@ -90,6 +107,30 @@ final class MapMarkers {
         iconSize: 0.7,
       ),
     );
+  }
+
+  Future<void> addMarker({
+    required BuildContext context,
+    required MapboxMap mapboxMap,
+    required Point point,
+    required Point? targetPoint,
+    required void Function(Point) onPointSelected,
+    required Future<void> Function() updateGuessLine,
+  }) async {
+    debugPrint('Adding marker at position: $point');
+
+    if (targetPoint != null) {
+      final distanceKm = calculateStraightLineDistanceKm(targetPoint, point);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Odległość w linii prostej: ${distanceKm.toStringAsFixed(2)} km')),
+        );
+    }
+
+    onPointSelected(point);
+    await addTapMarker(mapboxMap, point);
+    await updateGuessLine();
   }
 
   Future<void> renderPlaces(
