@@ -8,6 +8,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'game_core.dart';
 import 'guess_line_layer.dart';
 import 'map_markers.dart';
+import 'mapbox_map_view.dart';
 
 class _LoadedMapConfig {
   const _LoadedMapConfig({required this.token, required this.cityViewports});
@@ -63,7 +64,12 @@ Map<String, CameraViewportState> _decodeCityViewports(String json) {
 }
 
 class MapConfigLoader extends StatelessWidget {
-  const MapConfigLoader({super.key});
+  const MapConfigLoader({
+    this.mapViewBuilder = buildMapboxMapView,
+    super.key,
+  });
+
+  final MapViewBuilder mapViewBuilder;
 
   Future<_LoadedMapConfig> _loadMapConfig() async {
     final files = await Future.wait([
@@ -109,7 +115,10 @@ class MapConfigLoader extends StatelessWidget {
         }
 
         // 5. Zwracamy właściwy widok aplikacji, przekazując gotowy token
-        return MapScreen(cityViewports: config.cityViewports);
+        return MapScreen(
+          cityViewports: config.cityViewports,
+          mapViewBuilder: mapViewBuilder,
+        );
       },
     );
   }
@@ -117,9 +126,14 @@ class MapConfigLoader extends StatelessWidget {
 
 // Przykładowy docelowy widok mapy
 class MapScreen extends StatefulWidget {
-  const MapScreen({required this.cityViewports, super.key});
+  const MapScreen({
+    required this.cityViewports,
+    this.mapViewBuilder = buildMapboxMapView,
+    super.key,
+  });
 
   final Map<String, CameraViewportState> cityViewports;
+  final MapViewBuilder mapViewBuilder;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -510,10 +524,10 @@ class _MapScreenState extends State<MapScreen> {
                       ),
                     ),
                     Expanded(
-                      child: MapWidget(
-                        viewport: widget.cityViewports['Londyn']!,
-                        onMapCreated: _onMapCreated,
-                        onStyleLoadedListener: _onStyleLoaded,
+                      child: widget.mapViewBuilder(
+                        widget.cityViewports['Londyn']!,
+                        _onMapCreated,
+                        _onStyleLoaded,
                       ),
                     ),
                   ],
@@ -528,7 +542,12 @@ class _MapScreenState extends State<MapScreen> {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({
+    this.mapViewBuilder = buildMapboxMapView,
+    super.key,
+  });
+
+  final MapViewBuilder mapViewBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -536,7 +555,7 @@ class MyApp extends StatelessWidget {
       title: 'MapInsider',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue), useMaterial3: true),
       // Ustawiamy nasz widok ładowania konfiguracji jako ekran startowy
-      home: const MapConfigLoader(),
+      home: MapConfigLoader(mapViewBuilder: mapViewBuilder),
     );
   }
 }
