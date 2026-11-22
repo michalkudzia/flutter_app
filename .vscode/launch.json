@@ -1,0 +1,96 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Mapbox Sandbox (Node.js)",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/devtools/js/mapsandbox.js",
+            "cwd": "${workspaceFolder}",
+            "runtimeArgs": [
+                "--watch"
+            ],
+            "console": "integratedTerminal",
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
+        },
+        {
+            "name": "Flutter",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart"
+        },
+        {
+            "name": "Flutter (profile)",
+            "type": "dart",
+            "request": "launch",
+            "program": "lib/main.dart",
+            "flutterMode": "profile"
+        },
+        {
+            "name": "Flutter Web (Chrome)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--web-port=64247"
+            ],
+            "console": "terminal"
+        },
+        {
+            "name": "Flutter Web (Chrome - Profile)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--web-port=64247",
+                "--web-browser-flag=--auto-open-devtools-for-tabs"
+            ],
+            "console": "debugConsole"
+        },
+        {
+            "name": "Flutter Web (Chrome - Debug)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "debug",
+            "deviceId": "chrome",
+            "toolArgs": [
+                "--web-port=64247",
+                "--web-browser-flag=--auto-open-devtools-for-tabs"
+            ],
+            "console": "debugConsole"
+        },
+        {
+            "name": "Flutter Web (Edge)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "toolArgs": [
+                "--web-port=64247"
+            ],
+            "args": [
+                "-d",
+                "edge"
+            ]
+        },
+        {
+            "name": "Flutter Web (Edge - Profile)",
+            "request": "launch",
+            "type": "dart",
+            "program": "lib/main.dart",
+            "flutterMode": "profile",
+            "toolArgs": [
+                "--web-port=64247"
+            ],
+            "args": [
+                "-d",
+                "edge"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,65 @@
+{
+  "Warszawa": {
+    "center": {
+      "lng": 21.0122,
+      "lat": 52.2297
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Paryż": {
+    "center": {
+      "lng": 2.3522,
+      "lat": 48.8566
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Londyn": {
+    "center": {
+      "lng": -0.1276,
+      "lat": 51.5072
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Chicago": {
+    "center": {
+      "lng": -87.6298,
+      "lat": 41.8781
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Bombaj": {
+    "center": {
+      "lng": 72.8777,
+      "lat": 19.076
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Tokio": {
+    "center": {
+      "lng": 139.6917,
+      "lat": 35.6895
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "Meksyk": {
+    "center": {
+      "lng": -99.1332,
+      "lat": 19.4326
+    },
+    "zoom": 10,
+    "bearing": 0,
+    "pitch": 0
+  }
+}

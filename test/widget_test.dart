@@ -4,27 +4,36 @@
 // utility in the flutter_test package. For example, you can send tap and scroll
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
+//
 
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:material_ui/material_ui.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' show CameraViewportState, Point, Position;
 import 'package:mapinsider_flutter_app/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('Map screen builds with an injected map view', (WidgetTester tester) async {
+    final viewport = CameraViewportState(
+      center: Point(coordinates: Position(0, 0)),
+      zoom: 1,
+      bearing: 0,
+      pitch: 0,
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MapScreen(
+          cityViewports: {'Londyn': viewport},
+          mapViewBuilder: (viewport, onMapCreated, onStyleLoaded) {
+            return const SizedBox(key: ValueKey('fake-map'));
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.byType(MaterialApp), findsOneWidget);
+    expect(find.byKey(const ValueKey('fake-map')), findsOneWidget);
+    expect(find.text('Number of places'), findsOneWidget);
   });
 }
