@@ -3,9 +3,25 @@ description: Scaffolding for Flutter Widget Previews
 publish_to: none
 version: 0.0.1
 environment:
-  sdk: ^3.13.7
+  sdk: ^3.14.0
 dependencies:
+  dtd: ^4.0.0
   flutter:
     sdk: flutter
+  flutter_lints: ^6.0.0
+  google_fonts: ^9.0.0
+  json_rpc_2: ^4.1.0
+  mapinsider_flutter_app:
+    path: E:/Projekty/Flutter/mapinsider/flutter_app
+  material_ui: ^1.11.1
+  path: ^1.9.1
+  stack_trace: ^1.12.2
+  url_launcher: ^6.3.3
+  web: ^1.1.2
+  webview_flutter: ^4.14.1
+  webview_flutter_web: ^0.2.3+4
 flutter:
   uses-material-design: true
+dependency_overrides:
+  mapinsider_flutter_app:
+    path: E:/Projekty/Flutter/mapinsider/flutter_app
