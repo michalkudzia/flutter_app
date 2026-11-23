@@ -35,5 +35,8 @@ void main() {
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byKey(const ValueKey('fake-map')), findsOneWidget);
     expect(find.text('Number of places'), findsOneWidget);
+    expect(find.text('Zaloguj'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNWidgets(3));
+    expect(tester.widget<CheckboxListTile>(find.byType(CheckboxListTile).first).value, isTrue);
   });
 }

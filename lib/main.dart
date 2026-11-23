@@ -5,10 +5,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
-import 'game_core.dart';
+import 'mapinsider_game.dart';
 import 'guess_line_layer.dart';
 import 'map_markers.dart';
 import 'mapbox_map_view.dart';
+import 'mapinsider_ui.dart';
+import 'auth_gate.dart';
+import 'auth_session.dart';
 
 class _LoadedMapConfig {
   const _LoadedMapConfig({required this.token, required this.cityViewports});
@@ -63,13 +66,30 @@ Map<String, CameraViewportState> _decodeCityViewports(String json) {
   return viewports;
 }
 
-class MapConfigLoader extends StatelessWidget {
+class MapConfigLoader extends StatefulWidget {
   const MapConfigLoader({
     this.mapViewBuilder = buildMapboxMapView,
+    this.session,
+    this.onLogin,
+    this.onLogout,
+    this.isAuthenticating = false,
+    this.authError,
     super.key,
   });
 
   final MapViewBuilder mapViewBuilder;
+  final AuthSession? session;
+  final Future<void> Function()? onLogin;
+  final Future<void> Function()? onLogout;
+  final bool isAuthenticating;
+  final String? authError;
+
+  @override
+  State<MapConfigLoader> createState() => _MapConfigLoaderState();
+}
+
+class _MapConfigLoaderState extends State<MapConfigLoader> {
+  late final Future<_LoadedMapConfig> _mapConfig = _loadMapConfig();
 
   Future<_LoadedMapConfig> _loadMapConfig() async {
     final files = await Future.wait([
@@ -96,7 +116,7 @@ class MapConfigLoader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_LoadedMapConfig>(
-      future: _loadMapConfig(),
+      future: _mapConfig,
       builder: (context, snapshot) {
         // 2. Stan: Dane się jeszcze ładują (Spinner)
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -117,7 +137,12 @@ class MapConfigLoader extends StatelessWidget {
         // 5. Zwracamy właściwy widok aplikacji, przekazując gotowy token
         return MapScreen(
           cityViewports: config.cityViewports,
-          mapViewBuilder: mapViewBuilder,
+          mapViewBuilder: widget.mapViewBuilder,
+          session: widget.session,
+          onLogin: widget.onLogin,
+          onLogout: widget.onLogout,
+          isAuthenticating: widget.isAuthenticating,
+          authError: widget.authError,
         );
       },
     );
@@ -129,21 +154,24 @@ class MapScreen extends StatefulWidget {
   const MapScreen({
     required this.cityViewports,
     this.mapViewBuilder = buildMapboxMapView,
+    this.session,
+    this.onLogin,
+    this.onLogout,
+    this.isAuthenticating = false,
+    this.authError,
     super.key,
   });
 
   final Map<String, CameraViewportState> cityViewports;
   final MapViewBuilder mapViewBuilder;
+  final AuthSession? session;
+  final Future<void> Function()? onLogin;
+  final Future<void> Function()? onLogout;
+  final bool isAuthenticating;
+  final String? authError;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
-}
-
-class _Place {
-  const _Place({required this.name, required this.point});
-
-  final String name;
-  final Point point;
 }
 
 class _MapScreenState extends State<MapScreen> {
@@ -166,13 +194,13 @@ class _MapScreenState extends State<MapScreen> {
   final _game = TopoGuessGame();
   final _mapMarkers = MapMarkers();
   final _guessLineLayer = GuessLineLayer();
-  Map<String, List<_Place>>? _placesByCategory;
+  Map<String, List<MapPlace>>? _placesByCategory;
   bool _isStyleLoaded = false;
   String _selectedCity = 'Londyn';
-  String _selectedCategory = 'beginner';
-  List<_Place> _remainingTargets = [];
-  _Place? _selectedTarget;
-  int _targetCount = 1;
+  Set<String> _selectedCategories = {'beginner'};
+  List<MapPlace> _remainingTargets = [];
+  MapPlace? _selectedTarget;
+  int _targetCount = TopoGuessGame.initialTargetCount;
   final _guessTimer = Stopwatch();
   bool _isSubmittingGuess = false;
   int _citySelectionVersion = 0;
@@ -186,16 +214,18 @@ class _MapScreenState extends State<MapScreen> {
     final requestVersion = ++_citySelectionVersion;
     final placesByCategory = await _loadCityPlaces(city);
     if (!mounted || requestVersion != _citySelectionVersion) return;
-    final places = placesByCategory[_categoryDataKeys[_selectedCategory]!];
-    if (places == null || places.isEmpty) {
-      throw StateError('Brak miejsc do odgadnięcia dla kategorii "$_selectedCategory" w mieście "$city".');
+    final places = _placesForSelectedCategories(placesByCategory, city: city);
+    if (_selectedCategories.isNotEmpty && places.isEmpty) {
+      throw StateError(
+        'Brak miejsc do odgadnięcia dla wybranych kategorii "${_selectedCategories.join(', ')}" w mieście "$city".',
+      );
     }
 
     setState(() {
       _selectedCity = city;
       _placesByCategory = placesByCategory;
     });
-    await _startNewRound();
+    await _prepareNewRound();
 
     final mapboxMap = _mapboxMap;
     if (mapboxMap == null) return;
@@ -237,64 +267,70 @@ class _MapScreenState extends State<MapScreen> {
     final placesByCategory = await _loadCityPlaces(city);
     if (!mounted || requestVersion != _citySelectionVersion) return;
     _placesByCategory = placesByCategory;
-    await _startNewRound();
+    await _prepareNewRound();
     await _renderSelectedPlaces();
   }
 
-  Future<void> _selectCategory(String category) async {
+  Future<void> _toggleCategory(String category, bool selected) async {
     if (!_categoryDataKeys.containsKey(category)) {
       throw StateError('Nieznana kategoria miejsc "$category".');
     }
 
-    final placesByCategory = _placesByCategory;
-    final places = placesByCategory?[_categoryDataKeys[category]!];
-    if (places != null && places.isEmpty) {
-      throw StateError('Kategoria "$category" nie zawiera miejsc do odgadnięcia.');
+    final categories = Set<String>.of(_selectedCategories);
+    if (selected) {
+      categories.add(category);
+    } else {
+      categories.remove(category);
     }
-
-    setState(() => _selectedCategory = category);
-    await _startNewRound();
+    setState(() => _selectedCategories = categories);
+    await _prepareNewRound();
     await _renderSelectedPlaces();
   }
 
-  Future<void> _startNewRound({int? targetCount}) async {
-    final placesByCategory = _placesByCategory;
-    final places = placesByCategory?[_categoryDataKeys[_selectedCategory]!];
-    if (placesByCategory == null || places == null || places.isEmpty) {
-      _game.reset();
-      _guessTimer
-        ..stop()
-        ..reset();
-      setState(() {
-        _remainingTargets = [];
-        _selectedTarget = null;
-        _targetCount = 1;
-      });
-      await _guessLineLayer.clear(_mapboxMap);
-      return;
-    }
+  List<MapPlace> _placesForSelectedCategories(
+    Map<String, List<MapPlace>>? placesByCategory, {
+    required String city,
+  }) {
+    if (placesByCategory == null) return [];
 
-    final count = (targetCount ?? _targetCount).clamp(1, places.length).toInt();
-    final targets = _game.chooseRandomTargets(
-      category: _selectedCategory,
-      count: count,
+    final places = <MapPlace>[];
+    for (final category in _selectedCategories) {
+      final dataKey = _categoryDataKeys[category];
+      if (dataKey == null) {
+        throw StateError('Nieznana kategoria miejsc "$category".');
+      }
+
+      final categoryPlaces = placesByCategory[dataKey];
+      if (categoryPlaces == null) {
+        throw StateError('Plik dla miasta "$city" nie zawiera kategorii "$dataKey".');
+      }
+      places.addAll(categoryPlaces);
+    }
+    return places;
+  }
+
+  Future<void> _prepareNewRound({int? targetCount}) async {
+    final targets = _game.startNewRound(
+      categories: _selectedCategories,
+      targetCount: targetCount ?? _targetCount,
       categoryDataKeys: _categoryDataKeys,
-      placesByCategory: placesByCategory,
+      placesByCategory: _placesByCategory,
     );
-    _game.reset();
+
     _guessTimer
       ..stop()
-      ..reset()
-      ..start();
+      ..reset();
+    if (targets.isNotEmpty) _guessTimer.start();
+
     setState(() {
-      _targetCount = count;
+      _targetCount = targets.isEmpty ? 1 : targets.length;
       _remainingTargets = targets;
-      _selectedTarget = targets.first;
+      _selectedTarget = targets.isEmpty ? null : targets.first;
     });
     await _guessLineLayer.clear(_mapboxMap);
   }
 
-  Future<void> _selectTarget(_Place target) async {
+  Future<void> _selectTarget(MapPlace target) async {
     setState(() => _selectedTarget = target);
     _guessTimer
       ..stop()
@@ -353,14 +389,8 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _renderSelectedPlaces() async {
     final mapboxMap = _mapboxMap;
-    final placesByCategory = _placesByCategory;
-    if (mapboxMap == null || placesByCategory == null) return;
-
-    final dataKey = _categoryDataKeys[_selectedCategory]!;
-    final places = placesByCategory[dataKey];
-    if (places == null) {
-      throw StateError('Plik dla miasta "$_selectedCity" nie zawiera kategorii "$dataKey".');
-    }
+    if (mapboxMap == null) return;
+    final places = _placesForSelectedCategories(_placesByCategory, city: _selectedCity);
 
     await _mapMarkers.renderPlaces(
       mapboxMap,
@@ -368,7 +398,7 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Future<Map<String, List<_Place>>> _loadCityPlaces(String city) async {
+  Future<Map<String, List<MapPlace>>> _loadCityPlaces(String city) async {
     final dataFile = _cityDataFiles[city];
     if (dataFile == null) {
       throw StateError('Brak zestawu miejsc dla miasta "$city".');
@@ -384,14 +414,14 @@ class _MapScreenState extends State<MapScreen> {
       throw FormatException('Plik $dataFile nie zawiera kategorii miejsc.');
     }
 
-    final placesByCategory = <String, List<_Place>>{};
+    final placesByCategory = <String, List<MapPlace>>{};
     for (final entry in categories.entries) {
       final places = entry.value;
       if (places is! List) {
         throw FormatException('Kategoria "${entry.key}" musi być listą miejsc.');
       }
 
-      final categoryPlaces = <_Place>[];
+      final categoryPlaces = <MapPlace>[];
       for (var index = 0; index < places.length; index++) {
         final place = places[index];
         if (place is! Map<String, dynamic>) {
@@ -406,7 +436,7 @@ class _MapScreenState extends State<MapScreen> {
         }
 
         categoryPlaces.add(
-          _Place(
+          MapPlace(
             name: name,
             point: Point(
               coordinates: Position(longitude.toDouble(), latitude.toDouble()),
@@ -422,121 +452,29 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final availablePlaceCount = _placesByCategory?[_categoryDataKeys[_selectedCategory]!]?.length ?? 0;
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('MapInsider')),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final sidebarWidth = constraints.maxWidth < 600 ? 160.0 : 240.0;
-          return Row(
-            children: [
-              SizedBox(
-                width: sidebarWidth,
-                child: Material(
-                  color: Theme.of(context).colorScheme.surface,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text('Category', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 8),
-                        DropdownButton<String>(
-                          value: _selectedCategory,
-                          isExpanded: true,
-                          items: const [
-                            DropdownMenuItem(value: 'beginner', child: Text('beginner')),
-                            DropdownMenuItem(value: 'advanced', child: Text('advanced')),
-                            DropdownMenuItem(value: 'expert', child: Text('expert')),
-                          ],
-                          onChanged: _isSubmittingGuess
-                              ? null
-                              : (category) async {
-                                  if (category != null) await _selectCategory(category);
-                                },
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Number of places', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 8),
-                        DropdownButton<int>(
-                          value: availablePlaceCount == 0 ? null : _targetCount,
-                          isExpanded: true,
-                          items: List.generate(
-                            availablePlaceCount,
-                            (index) => DropdownMenuItem(
-                              value: index + 1,
-                              child: Text('${index + 1}'),
-                            ),
-                          ),
-                          onChanged: availablePlaceCount == 0 || _isSubmittingGuess
-                              ? null
-                              : (count) async {
-                                  if (count != null) await _startNewRound(targetCount: count);
-                                },
-                        ),
-                        const SizedBox(height: 16),
-                        Text('Place to guess', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 8),
-                        DropdownButton<_Place>(
-                          value: _selectedTarget,
-                          isExpanded: true,
-                          items: _remainingTargets
-                              .map(
-                                (place) => DropdownMenuItem(
-                                  value: place,
-                                  child: Text(place.name, overflow: TextOverflow.ellipsis),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _isSubmittingGuess
-                              ? null
-                              : (place) async {
-                                  if (place != null) await _selectTarget(place);
-                                },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: Column(
-                  children: [
-                    SizedBox(
-                      height: 64,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        scrollDirection: Axis.horizontal,
-                        itemCount: widget.cityViewports.length,
-                        separatorBuilder: (context, index) => const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final city = widget.cityViewports.keys.elementAt(index);
-                          return ChoiceChip(
-                            label: Text(city),
-                            selected: _selectedCity == city,
-                            onSelected: (selected) async {
-                              if (selected && !_isSubmittingGuess) await _selectCity(city);
-                            },
-                          );
-                        },
-                      ),
-                    ),
-                    Expanded(
-                      child: widget.mapViewBuilder(
-                        widget.cityViewports['Londyn']!,
-                        _onMapCreated,
-                        _onStyleLoaded,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+    final availablePlaceCount = _placesForSelectedCategories(_placesByCategory, city: _selectedCity).length;
+    return MapInsiderUi(
+      cityViewports: widget.cityViewports,
+      mapViewBuilder: widget.mapViewBuilder,
+      categoryKeys: _categoryDataKeys.keys,
+      selectedCategories: _selectedCategories,
+      availablePlaceCount: availablePlaceCount,
+      targetCount: _targetCount,
+      remainingTargets: _remainingTargets,
+      selectedTarget: _selectedTarget,
+      isSubmittingGuess: _isSubmittingGuess,
+      selectedCity: _selectedCity,
+      onToggleCategory: _toggleCategory,
+      onPrepareNewRound: _prepareNewRound,
+      onSelectTarget: _selectTarget,
+      onSelectCity: _selectCity,
+      onMapCreated: _onMapCreated,
+      onStyleLoaded: _onStyleLoaded,
+      session: widget.session,
+      onLogin: widget.onLogin,
+      onLogout: widget.onLogout,
+      isAuthenticating: widget.isAuthenticating,
+      authError: widget.authError,
     );
   }
 }
@@ -554,17 +492,31 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'MapInsider',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue), useMaterial3: true),
-      // Ustawiamy nasz widok ładowania konfiguracji jako ekran startowy
-      home: MapConfigLoader(mapViewBuilder: mapViewBuilder),
+      home: AuthGate(
+        gameBuilder:
+            ({
+              required AuthSession? session,
+              required Future<void> Function() onLogin,
+              required Future<void> Function() onLogout,
+              required bool isAuthenticating,
+              required String? authError,
+              required Key gameKey,
+            }) => MapConfigLoader(
+              key: gameKey,
+              mapViewBuilder: mapViewBuilder,
+              session: session,
+              onLogin: onLogin,
+              onLogout: session == null ? null : onLogout,
+              isAuthenticating: isAuthenticating,
+              authError: authError,
+            ),
+      ),
     );
   }
 }
 
-void main() async {
-  // 1. Inicjalizacje platformowe Fluttera (wymagane przed operacjami asynchronicznymi w main)
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // 2. Asynchroniczne wczytanie tokenu z pliku JSON w assets
+Future<String> getMapboxAccessToken() async {
+  // Asynchroniczne wczytanie tokenu z pliku JSON w assets
   String accessToken = "";
   try {
     final String jsonString = await rootBundle.loadString('assets/config.json');
@@ -573,10 +525,15 @@ void main() async {
   } catch (e) {
     debugPrint("Błąd wczytywania pliku konfiguracyjnego: $e");
   }
+  return accessToken;
+}
 
-  // Pass your access token to MapboxOptions so you can load a map
+void main() async {
+  // Inicjalizacje platformowe Fluttera (wymagane przed operacjami asynchronicznymi w main)
+  WidgetsFlutterBinding.ensureInitialized();
+  final String accessToken = await getMapboxAccessToken();
   debugPrint("Access Token: $accessToken");
+  // Pass your access token to MapboxOptions so you can load a map
   MapboxOptions.setAccessToken(accessToken);
-
   runApp(const MyApp());
 }

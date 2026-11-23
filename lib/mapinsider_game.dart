@@ -18,6 +18,8 @@ class TopoGuessGame {
   final String targetName;
   final Random _random;
 
+  static const int initialTargetCount = 5;
+
   int score = 0;
   int attempts = 0;
   bool gameOver = false;
@@ -52,6 +54,33 @@ class TopoGuessGame {
     }
 
     final shuffledPlaces = List<T>.of(places)..shuffle(_random);
+    return shuffledPlaces.take(count).toList();
+  }
+
+  List<T> startNewRound<T>({
+    required Iterable<String> categories,
+    required int targetCount,
+    required Map<String, String> categoryDataKeys,
+    required Map<String, List<T>>? placesByCategory,
+  }) {
+    final places = <T>[];
+    for (final category in categories) {
+      final dataKey = categoryDataKeys[category];
+      if (dataKey == null) {
+        throw StateError('Nieznana kategoria miejsc "$category".');
+      }
+
+      places.addAll(placesByCategory?[dataKey] ?? []);
+    }
+
+    if (places.isEmpty) {
+      reset();
+      return [];
+    }
+
+    final count = targetCount.clamp(1, places.length).toInt();
+    final shuffledPlaces = List<T>.of(places)..shuffle(_random);
+    reset();
     return shuffledPlaces.take(count).toList();
   }
 

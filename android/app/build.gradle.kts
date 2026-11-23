@@ -27,6 +27,8 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["auth0Domain"] = "michalq.eu.auth0.com"
+        manifestPlaceholders["auth0Scheme"] = "https"
     }
 
     buildTypes {
