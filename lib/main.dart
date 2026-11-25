@@ -79,7 +79,12 @@ class MapConfigLoader extends StatefulWidget {
 
   final MapViewBuilder mapViewBuilder;
   final AuthSession? session;
-  final Future<void> Function()? onLogin;
+  final Future<void> Function({
+    required String email,
+    required String password,
+    String? nickname,
+  })?
+  onLogin;
   final Future<void> Function()? onLogout;
   final bool isAuthenticating;
   final String? authError;
@@ -165,7 +170,12 @@ class MapScreen extends StatefulWidget {
   final Map<String, CameraViewportState> cityViewports;
   final MapViewBuilder mapViewBuilder;
   final AuthSession? session;
-  final Future<void> Function()? onLogin;
+  final Future<void> Function({
+    required String email,
+    required String password,
+    String? nickname,
+  })?
+  onLogin;
   final Future<void> Function()? onLogout;
   final bool isAuthenticating;
   final String? authError;
@@ -496,7 +506,12 @@ class MyApp extends StatelessWidget {
         gameBuilder:
             ({
               required AuthSession? session,
-              required Future<void> Function() onLogin,
+              required Future<void> Function({
+                required String email,
+                required String password,
+                String? nickname,
+              })
+              onLogin,
               required Future<void> Function() onLogout,
               required bool isAuthenticating,
               required String? authError,

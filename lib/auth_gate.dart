@@ -11,7 +11,12 @@ class AuthGate extends StatefulWidget {
 
   final Widget Function({
     required AuthSession? session,
-    required Future<void> Function() onLogin,
+    required Future<void> Function({
+      required String email,
+      required String password,
+      String? nickname,
+    })
+    onLogin,
     required Future<void> Function() onLogout,
     required bool isAuthenticating,
     required String? authError,
@@ -47,14 +52,22 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  Future<void> _login() async {
+  Future<void> _login({
+    required String email,
+    required String password,
+    String? nickname,
+  }) async {
     setState(() {
       _isAuthenticating = true;
       _authError = null;
     });
     try {
-      final session = await _auth.login();
-      if (!mounted) return;
+      final session = await _auth.login(
+        email: email,
+        password: password,
+        nickname: nickname,
+      );
+      if (!mounted || session == null) return;
       setState(() {
         _session = session;
         _isAuthenticating = false;

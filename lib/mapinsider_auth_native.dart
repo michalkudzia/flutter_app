@@ -18,12 +18,20 @@ class MapInsiderAuth {
     return _toSession(credentials);
   }
 
-  Future<AuthSession> login() async {
+  Future<AuthSession?> login({
+    required String email,
+    required String password,
+    String? nickname,
+  }) async {
     final Credentials credentials;
+    final parameters = <String, String>{'screen_hint': 'signup'};
+    if (nickname != null) parameters['nickname'] = nickname;
+
     if (Platform.isWindows) {
       credentials = await _windowsAuth.login(
         appCustomURL: 'mapinsider://callback',
         scopes: const {'openid', 'profile', 'email', 'offline_access'},
+        parameters: parameters,
       );
     } else {
       credentials = await _auth0
@@ -31,6 +39,7 @@ class MapInsiderAuth {
           .login(
             useHTTPS: true,
             scopes: const {'openid', 'profile', 'email', 'offline_access'},
+            parameters: parameters,
           );
     }
     return _toSession(credentials);
@@ -48,7 +57,7 @@ class MapInsiderAuth {
     final user = credentials.user;
     return AuthSession(
       subject: user.sub,
-      name: user.name ?? user.nickname ?? user.email ?? 'Użytkownik',
+      name: user.nickname ?? user.name ?? user.email ?? 'Użytkownik',
       email: user.email,
     );
   }
