@@ -57,7 +57,7 @@ class MapInsiderAuth {
     final user = credentials.user;
     return AuthSession(
       subject: user.sub,
-      name: user.nickname ?? user.name ?? user.email ?? 'Użytkownik',
+      name: user.name ?? user.nickname ?? user.email ?? 'Użytkownik',
       email: user.email,
     );
   }
