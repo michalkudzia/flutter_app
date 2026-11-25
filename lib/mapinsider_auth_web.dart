@@ -70,7 +70,7 @@ class MapInsiderAuth {
 
     return AuthSession(
       subject: profile['sub'] as String? ?? '',
-      name: profile['nickname'] as String? ?? profile['name'] as String? ?? profile['email'] as String? ?? 'Użytkownik',
+      name: profile['name'] as String? ?? profile['nickname'] as String? ?? profile['email'] as String? ?? 'Użytkownik',
       email: profile['email'] as String?,
     );
   }
@@ -117,7 +117,7 @@ class MapInsiderAuth {
     final user = credentials.user;
     return AuthSession(
       subject: user.sub,
-      name: user.nickname ?? user.name ?? user.email ?? 'Użytkownik',
+      name: user.name ?? user.nickname ?? user.email ?? 'Użytkownik',
       email: user.email,
     );
   }
